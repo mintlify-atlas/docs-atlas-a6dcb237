@@ -1,0 +1,226 @@
+---
+title: "Video and Image Storage with Cloudinary in VideoHub"
+sidebarTitle: "Media Storage"
+description: "VideoHub uses Cloudinary for all media storage. Videos are uploaded via Multer to a temp directory, then streamed to Cloudinary with background processing."
+---
+
+Every piece of media in VideoHub — video files, auto-generated and custom thumbnails, user avatars, and channel cover images — is stored in Cloudinary. The backend never serves binary files directly; it stores Cloudinary URLs in MongoDB and returns those URLs to clients. Local disk is used only as a transient staging area during the upload pipeline.
+
+## Upload Pipeline
+
+The journey from an HTTP request to a persisted Cloudinary URL follows the same pattern for every media type:
+
+<Steps>
+  <Step title="Client sends multipart/form-data">
+    The client encodes the file(s) in a `multipart/form-data` request and POSTs it to the appropriate endpoint. For videos the fields are `videoFile` and optionally `thumbnail`; for profile images the field is `avatar` or `coverImage`.
+  </Step>
+  <Step title="Multer saves the file to disk">
+    The `upload` middleware (configured in `multer.middleware.js`) intercepts the request before it reaches the controller. It uses `diskStorage` to write the file to `Backend/public/temp/` with a collision-resistant filename composed of the original field name, the current timestamp, and a random integer.
+
+    ```js
+    // multer.middleware.js
+    const storage = multer.diskStorage({
+      destination: function (req, file, cb) {
+        cb(null, "public/temp");
+      },
+      filename: function (req, file, cb) {
+        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+        cb(null, file.fieldname + "-" + uniqueSuffix);
+      },
+    });
+
+    export const upload = multer({
+      storage: storage,
+      limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB hard cap
+    });
+    ```
+
+    Route handlers apply the middleware using `upload.fields()` for multi-file uploads or `upload.single()` for single-file uploads.
+  </Step>
+  <Step title="Controller reads the local path">
+    After Multer runs, the controller reads the temporary file path from `req.files` (multi-field) or `req.file` (single-field):
+
+    ```js
+    // Multi-file (video upload)
+    const videoLocalPath = req.files?.videoFile?.[0]?.path;
+    const thumbnailLocalPath = req.files?.thumbnail?.[0]?.path;
+
+    // Single-file (avatar update)
+    const avatarLocalPath = req.file?.path;
+    ```
+  </Step>
+  <Step title="uploadOnCloudinary streams the file">
+    `uploadOnCloudinary(localFilePath, isVideo)` (defined in `utils/cloudinary.js`) opens the local file and streams it to Cloudinary using `uploader.upload_large`. For video uploads it sets `resource_type: "video"` and applies a `1920×1080` crop limit transformation with `eager_async: true` so that transcoding happens asynchronously on Cloudinary's side.
+
+    ```js
+    // utils/cloudinary.js
+    const uploadOnCloudinary = async (localFilePath, isVideo = false) => {
+      const options = {
+        resource_type: isVideo ? "video" : "auto",
+      };
+
+      if (isVideo) {
+        options.transformation = [{ width: 1920, height: 1080, crop: "limit" }];
+        options.eager_async = true;
+      }
+
+      return await new Promise((resolve, reject) => {
+        cloudinary.uploader.upload_large(localFilePath, options, (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        });
+      });
+    };
+    ```
+  </Step>
+  <Step title="URL saved to MongoDB; temp file deleted">
+    On a successful upload the controller (or background function) writes the returned `secure_url` to the relevant MongoDB document. Whether the upload succeeds or fails, the temp file is always removed in the `finally` block to prevent disk accumulation:
+
+    ```js
+    // Background process cleanup — video.controller.js
+    } finally {
+      if (videoLocalPath && fs.existsSync(videoLocalPath))
+        fs.unlinkSync(videoLocalPath);
+      if (thumbnailLocalPath && fs.existsSync(thumbnailLocalPath))
+        fs.unlinkSync(thumbnailLocalPath);
+    }
+    ```
+  </Step>
+</Steps>
+
+## Video Upload Flow
+
+Uploading a video is a deliberate two-step process that decouples ID reservation from the potentially long-running upload and Cloudinary processing job.
+
+<Steps>
+  <Step title="Reserve a Video ID — POST /api/v1/videos/init">
+    The client calls this endpoint first. No file is sent. The controller generates a valid MongoDB `ObjectId` in memory — **nothing is written to the database** — and returns it as `videoId`:
+
+    ```bash
+    curl -X POST http://localhost:5000/api/v1/videos/init \
+      -H "Authorization: Bearer <accessToken>"
+    ```
+
+    ```json
+    {
+      "statusCode": 200,
+      "data": { "videoId": "664f1a2b3c4d5e6f7a8b9c0d" },
+      "message": "Video Id generated successfully",
+      "success": true
+    }
+    ```
+
+    Having a stable `videoId` before the upload starts lets the client build a shareable URL, track upload state, or resume a failed upload without creating orphaned DB records.
+  </Step>
+  <Step title="Upload the file — POST /api/v1/videos/:videoId">
+    The client sends a `multipart/form-data` request to the ID reserved in step 1, including the video file, an optional thumbnail, title, and description:
+
+    ```bash
+    curl -X POST http://localhost:5000/api/v1/videos/664f1a2b3c4d5e6f7a8b9c0d \
+      -H "Authorization: Bearer <accessToken>" \
+      -F "videoFile=@/path/to/video.mp4" \
+      -F "thumbnail=@/path/to/thumb.jpg" \
+      -F "title=My First Video" \
+      -F "description=A short description"
+    ```
+
+    The controller (`publishVideoDraft`) immediately creates a MongoDB record with `isPublished: false` and placeholder values for `videoFile` and `thumbnail`, then fires `processVideoBackground` asynchronously — **the HTTP response is returned to the client before Cloudinary processing is complete**:
+
+    ```json
+    {
+      "statusCode": 200,
+      "data": { "_id": "664f1a2b3c4d5e6f7a8b9c0d", "isPublished": false, "title": "My First Video", "..." : "..." },
+      "message": "Video is uploading and processing in the background",
+      "success": true
+    }
+    ```
+
+    Once `processVideoBackground` finishes uploading to Cloudinary it calls `Video.findByIdAndUpdate` to set the real `videoFile` URL, `thumbnail` URL, `duration`, and flips `isPublished` to `true`, making the video visible in the feed.
+  </Step>
+</Steps>
+
+## Auto-Thumbnail Generation
+
+If the client does not supply a thumbnail in the upload request, VideoHub automatically derives one from the video itself using Cloudinary's `so_auto` transformation. The background function constructs a thumbnail URL by inserting `so_auto` into the video's Cloudinary URL and converting the file extension to `.jpg`:
+
+```js
+// Auto-thumbnail derivation — video.controller.js
+if (videoUrl.includes("/upload/")) {
+  const splitUrl = videoUrl.split("/upload/");
+  finalThumbnailUrl = `${splitUrl[0]}/upload/so_auto/${splitUrl[1].replace(".mp4", ".jpg")}`;
+}
+```
+
+`so_auto` instructs Cloudinary to select the most visually interesting frame as the poster image. No additional API call is made — the thumbnail URL is resolved on-the-fly by Cloudinary's image delivery pipeline.
+
+## Video Constraints
+
+The background upload function enforces a **maximum video duration of 1 hour (3 600 seconds)**. If the uploaded video exceeds this limit, the pipeline:
+
+1. Destroys the video asset from Cloudinary (`resource_type: "video"`)
+2. Deletes the MongoDB document created for the draft
+3. Removes any local thumbnail temp file
+
+```js
+if (videoUpload.duration > 3600) {
+  await cloudinary.uploader.destroy(videoUpload.public_id, { resource_type: "video" });
+  await Video.findByIdAndDelete(videoId);
+  if (thumbnailLocalPath && fs.existsSync(thumbnailLocalPath))
+    fs.unlinkSync(thumbnailLocalPath);
+  console.error(`Video ${videoId} rejected: Exceeded 1 hour limit.`);
+  return;
+}
+```
+
+Multer enforces a separate **500 MB hard cap** at the HTTP layer, rejecting oversized payloads before they ever reach the controller.
+
+## Cloudinary Configuration
+
+Three environment variables must be present before the server starts. They are read in `utils/cloudinary.js` via `dotenv`:
+
+| Variable | Description |
+|---|---|
+| `CLOUDINARY_CLOUD_NAME` | Your Cloudinary account's cloud name |
+| `CLOUDINARY_API_KEY` | Public API key from the Cloudinary dashboard |
+| `CLOUDINARY_SECRET_KEY` | Secret API key — treat this like a password |
+
+```bash
+# .env
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=123456789012345
+CLOUDINARY_SECRET_KEY=your_api_secret
+```
+
+These three values initialise the SDK client once at module load time:
+
+```js
+// utils/cloudinary.js
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_SECRET_KEY,
+});
+```
+
+## Image Uploads (Avatar and Cover Image)
+
+Avatar and cover image updates follow a simpler, synchronous path. The route uses `upload.single()` to accept one file, and the controller:
+
+1. Uploads the new image to Cloudinary via `uploadOnCloudinary(localFilePath)`
+2. Extracts the `public_id` from the old Cloudinary URL stored in the user document
+3. Calls `cloudinary.uploader.destroy(publicId)` to delete the old file
+4. Saves the new URL to the `User` document in MongoDB
+
+```js
+// Deleting the old avatar before saving the new one
+const parts = existingUser.avatar.split("/");
+const fileWithExtension = parts[parts.length - 1];
+const publicId = fileWithExtension.split(".")[0];
+await cloudinary.uploader.destroy(publicId);
+```
+
+This keeps Cloudinary storage tidy by ensuring replaced assets are removed immediately rather than accumulating indefinitely.
+
+<Note>
+  The `Backend/public/temp/` directory is gitignored and only a `.gitkeep` file is committed to preserve the directory in version control. In containerised or serverless deployments, ensure the process has **write permissions** to this path before the server starts. The `index.js` entry point handles this automatically — it checks for the directory on boot and creates it (with `recursive: true`) if it is missing, so a fresh container will never fail due to a missing temp directory.
+</Note>

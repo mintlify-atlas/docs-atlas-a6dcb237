@@ -1,0 +1,184 @@
+---
+title: "Authenticate API Requests in VideoHub"
+sidebarTitle: "Authentication"
+description: "VideoHub uses JWT access tokens and refresh tokens stored in HttpOnly cookies. Learn how to authenticate and refresh sessions programmatically."
+---
+
+VideoHub authenticates every request with a dual-token strategy: a short-lived **access token** (valid for the duration set by `ACCESS_TOKEN_EXPIRY`, defaulting to 1 day) and a long-lived **refresh token** (defaulting to 10 days). The access token is used on every protected API call. The refresh token exists solely to obtain a new access token once the current one expires, without forcing the user to log in again.
+
+## How Tokens Work
+
+### Access Token
+
+The access token is a signed JWT that embeds enough identity information for the server to authorise a request without a database round-trip:
+
+```js
+// Payload encoded into the access token (from user.models.js)
+{
+  _id:      "<MongoDB ObjectId>",
+  email:    "user@example.com",
+  username: "johndoe",
+  fullname: "John Doe"
+}
+```
+
+- Signed with `ACCESS_TOKEN_SECRET`
+- Expires after `ACCESS_TOKEN_EXPIRY`
+- **Not** persisted in the database — validity is determined purely by signature and expiry
+
+### Refresh Token
+
+The refresh token carries only the user's `_id` and is stored in the database on the `User` document:
+
+```js
+// Payload encoded into the refresh token
+{
+  _id: "<MongoDB ObjectId>"
+}
+```
+
+- Signed with `REFRESH_TOKEN_SECRET`
+- Expires after `REFRESH_TOKEN_EXPIRY`
+- Saved to `User.refreshToken` in MongoDB — invalidating it (on logout or token rotation) immediately revokes the session
+
+## Obtaining Tokens (Login)
+
+Send a `POST` request to `/api/v1/users/login` with the user's credentials. Both `email` and `password` are required.
+
+```bash
+curl -X POST http://localhost:5000/api/v1/users/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "yourpassword"}'
+```
+
+On success, the server sets `accessToken` and `refreshToken` as `HttpOnly` cookies **and** returns them in the response body so that non-browser clients can store them explicitly:
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "user": {
+      "_id": "664f1a2b3c4d5e6f7a8b9c0d",
+      "username": "johndoe",
+      "email": "user@example.com",
+      "fullName": "John Doe",
+      "avatar": "https://res.cloudinary.com/...",
+      "coverImage": "https://res.cloudinary.com/..."
+    },
+    "accessToken": "<signed-jwt>",
+    "refreshToken": "<signed-jwt>"
+  },
+  "message": "User logged in successfully",
+  "success": true
+}
+```
+
+## Passing the Access Token
+
+Every request to a protected endpoint must supply the access token in one of two ways:
+
+**Option 1 — Cookie (recommended for browser clients)**
+
+If your client is a browser and you set `credentials: 'include'` on every fetch/axios call, the cookie is attached automatically after login. No extra headers are required.
+
+```js
+// Browser fetch — cookie is sent automatically
+const response = await fetch("http://localhost:5000/api/v1/videos", {
+  credentials: "include",
+});
+```
+
+```js
+// Axios — set globally once
+axios.defaults.withCredentials = true;
+```
+
+**Option 2 — Authorization header (for non-browser / server-to-server clients)**
+
+```bash
+curl http://localhost:5000/api/v1/users/current-user \
+  -H "Authorization: Bearer <accessToken>"
+```
+
+```js
+// JavaScript fetch with explicit header
+const response = await fetch("http://localhost:5000/api/v1/users/current-user", {
+  headers: {
+    Authorization: `Bearer ${accessToken}`,
+  },
+});
+```
+
+The `verifyJwt` middleware checks `req.cookies?.accessToken` first, then falls back to the `Authorization` header:
+
+```js
+// From auth.middleware.js
+const token =
+  req.cookies?.accessToken ||
+  req.header("Authorization")?.replace("Bearer ", "");
+```
+
+## Refreshing the Access Token
+
+When the access token expires, call `POST /api/v1/users/refresh-token`. Supply the refresh token either as a cookie (automatic in browsers) or in the request body:
+
+```bash
+# Via cookie (browser clients — no body needed)
+curl -X POST http://localhost:5000/api/v1/users/refresh-token \
+  --cookie "refreshToken=<your-refresh-token>"
+
+# Via request body (non-browser clients)
+curl -X POST http://localhost:5000/api/v1/users/refresh-token \
+  -H "Content-Type: application/json" \
+  -d '{"refreshToken": "<your-refresh-token>"}'
+```
+
+A new pair of `accessToken` and `refreshToken` is issued and set as cookies. The old refresh token is invalidated in the database.
+
+## Auth Middleware Reference
+
+VideoHub exposes two auth middleware functions from `auth.middleware.js`:
+
+| Middleware | Behaviour |
+|---|---|
+| `verifyJwt` | **Strict.** Requires a valid token. Returns `401 Please login first to perform this action` if no token is present, or `401 Invalid or expired access token` if the token fails verification. Attaches the resolved user to `req.user`. |
+| `verifyJWTIfAvailable` | **Optional.** Attempts to verify the token if one is present. On failure — whether missing, expired, or tampered — it silently calls `next()` and treats the caller as a guest. If verification succeeds, attaches `req.user` for the controller to use. |
+
+## Public vs. Protected Endpoints
+
+**Public — no token required**
+
+- `GET /api/v1/healthcheck`
+- `POST /api/v1/users/register`
+- `POST /api/v1/users/login`
+- `POST /api/v1/users/refresh-token`
+- `GET /api/v1/videos` *(feed — uses `verifyJWTIfAvailable` to optionally personalise)*
+- `GET /api/v1/videos/:videoId` *(uses `verifyJWTIfAvailable` to surface `isLiked` for the caller)*
+
+**Protected — valid access token required (`verifyJwt`)**
+
+- `POST /api/v1/users/logout`
+- `GET /api/v1/users/current-user`
+- `PATCH /api/v1/users/update-account`
+- `PATCH /api/v1/users/change-password`
+- `PATCH /api/v1/users/avatar`
+- `PATCH /api/v1/users/cover-image`
+- All write operations on `/api/v1/videos`, `/api/v1/likes`, `/api/v1/comments`, `/api/v1/subscriptions`, `/api/v1/playlist`
+
+## Logging Out
+
+`POST /api/v1/users/logout` performs two actions atomically:
+
+1. Clears the `refreshToken` field on the `User` document in MongoDB, invalidating the session server-side
+2. Clears the `accessToken` and `refreshToken` cookies on the client
+
+```bash
+curl -X POST http://localhost:5000/api/v1/users/logout \
+  -H "Authorization: Bearer <accessToken>"
+```
+
+After logout, the previously-issued refresh token cannot be reused even if it has not yet expired.
+
+<Warning>
+  **Never store JWTs in `localStorage` or `sessionStorage`.** These storage mechanisms are accessible to any JavaScript running on the page, making them vulnerable to XSS attacks. Always prefer HttpOnly cookies — they cannot be read by client-side scripts and are automatically attached to requests by the browser. If you must handle tokens manually in a non-browser environment, store them in memory and never persist them to disk in plaintext.
+</Warning>

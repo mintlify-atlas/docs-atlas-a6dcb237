@@ -1,0 +1,165 @@
+---
+title: "VideoHub API Error Codes and Error Handling"
+sidebarTitle: "Errors"
+description: "VideoHub returns structured JSON errors with HTTP status codes. Learn the error envelope format and common error codes returned across the API."
+---
+
+All errors returned by the VideoHub API follow a consistent JSON envelope based on the `ApiError` class. Whether the problem is a missing field, an expired token, or an internal server fault, the response always has the same shape — making errors straightforward to handle in any client.
+
+## Error Response Shape
+
+When a request fails, the API responds with a JSON body that mirrors the success envelope but with `success` set to `false` and `data` set to `null`. The `errors` array is populated when additional validation detail is available.
+
+```json
+{
+  "statusCode": 400,
+  "message": "All fields are required",
+  "success": false,
+  "errors": []
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `statusCode` | `number` | Mirrors the HTTP status code of the response |
+| `message` | `string` | Human-readable explanation of what went wrong |
+| `success` | `boolean` | Always `false` for error responses |
+| `errors` | `array` | Additional validation details; empty array when not applicable |
+
+<Tip>
+  Check the `message` field in error responses for human-readable detail. The `errors` array contains additional validation details when present.
+</Tip>
+
+## HTTP Status Codes
+
+VideoHub uses standard HTTP status codes. The table below lists every code you may encounter and its typical cause.
+
+| Status | Meaning | Common Trigger |
+|--------|---------|----------------|
+| `200` | OK | Successful read or update operation |
+| `201` | Created | Successful resource creation (registration, video upload) |
+| `400` | Bad Request | Missing or invalid request fields |
+| `401` | Unauthorized | Missing, expired, or invalid JWT access token |
+| `403` | Forbidden | Authenticated but not the owner or otherwise not permitted |
+| `404` | Not Found | Requested resource does not exist |
+| `409` | Conflict | Duplicate resource (username, email, or playlist name already taken) |
+| `500` | Internal Server Error | Upload failure, database error, or token generation failure |
+
+## Error Handling Pattern
+
+Every controller in VideoHub is wrapped with the `asyncHandler` utility. Any thrown `ApiError` — or any unexpected promise rejection — is caught by the wrapper and forwarded to Express's response pipeline, ensuring no unhandled rejection can crash the server.
+
+```js
+const asyncHandler = (func) => async (req, res, next) => {
+  try {
+    return await func(req, res, next)
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message
+    })
+  }
+}
+```
+
+When `error.statusCode` is not set (i.e. the error was not an `ApiError` instance), the handler falls back to `500` so the client always receives a well-formed response rather than an empty connection drop.
+
+## ApiError Constructor
+
+Errors are created throughout the codebase using the `ApiError` class, which extends the native `Error`. Construct one anywhere you need to signal a failure:
+
+```js
+new ApiError(statusCode, message, errors, stack)
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `statusCode` | `number` | — | HTTP status code to send to the client |
+| `message` | `string` | `"Something went wrong"` | Human-readable error description |
+| `errors` | `array` | `[]` | Optional array of additional validation detail objects |
+| `stack` | `string` | `""` | Optional custom stack trace; if omitted, `Error.captureStackTrace` generates one automatically |
+
+The constructor sets `this.success = false` and `this.data = null` unconditionally, so the error shape is always consistent with the success envelope.
+
+## Authentication Errors
+
+The `verifyJwt` middleware guards protected routes. The exact `message` you receive depends on what is wrong with the token.
+
+| Status | Message | Cause |
+|--------|---------|-------|
+| `401` | `"Please login first to perform this action"` | No token found in the `Authorization` header or `accessToken` cookie |
+| `401` | `"Invalid access token"` | Token was valid JWT but the user ID it encodes no longer exists |
+| `401` | `"Invalid or expired access token"` | `jwt.verify` threw — the token is expired, malformed, or signed with a different secret |
+| `401` | `"Invalid Refresh Token"` | The refresh token used on `/users/refresh-token` is not valid or has been revoked |
+| `401` | `"Unauthorized request"` | General authorization rejection from a protected route |
+
+<Warning>
+  Access tokens are short-lived. When you receive a `401` with `"Invalid or expired access token"`, call the token refresh endpoint before retrying the original request. If the refresh token is also rejected, the user must log in again.
+</Warning>
+
+## Validation Errors (400)
+
+These `400 Bad Request` responses are returned when required fields are absent, IDs are malformed, or input fails a logical check.
+
+**Common messages across controllers**
+
+| Message | Source |
+|---------|--------|
+| `"All fields are required"` | User registration — username, email, fullname, or password missing |
+| `"Title is required"` | Video upload — title field not provided |
+| `"Video files are required"` | Video upload — no video file attached |
+| `"Comment body is mandatory"` | Comment creation — empty comment text |
+| `"Comment Id not received"` | Comment update/delete — no comment ID in params |
+| `"Video ID not recieved"` | Video operations — no video ID in request |
+| `"Playlist ID not recieved"` | Playlist operations — no playlist ID provided |
+| `"Playlist name is required"` | Playlist creation — name field is empty |
+| `"Playlist name cannot be empty"` | Playlist update — name set to blank string |
+| `"Please provide a name or description to update"` | Playlist update — neither field supplied |
+| `"This video is already in the playlist"` | Playlist — duplicate video add attempt |
+| `"User cannot subscribe to their own channel"` | Subscription — self-subscription attempt |
+| `"Invalid Video ID format"` | Any video route — ID fails MongoDB ObjectId validation |
+| `"Invalid Comment ID format"` | Any comment route — ID fails MongoDB ObjectId validation |
+| `"Invalid playlist ID"` | Any playlist route — ID fails MongoDB ObjectId validation |
+| `"Username or email is required"` | Login — both identifier fields are empty |
+| `"User does not exist"` | Login or profile — no matching account found |
+
+## Ownership / Permission Errors (403)
+
+A `403 Forbidden` response is returned when the authenticated user is valid but is not permitted to take the requested action on a resource they do not own.
+
+| Message | Trigger |
+|---------|---------|
+| `"You do not have permission to edit this comment"` | Trying to update a comment created by another user |
+| `"You do not have permission to delete this comment"` | Trying to delete a comment created by another user |
+| `"You do not have permission to modify this playlist"` | Trying to add/remove videos from another user's playlist |
+| `"You do not have permission to toggle this video's status"` | Trying to publish/unpublish a video you did not upload |
+
+<Note>
+  The API distinguishes between `401 Unauthorized` (the request carries no valid identity) and `403 Forbidden` (the identity is valid but lacks the required ownership). Always check the status code first when diagnosing access failures.
+</Note>
+
+## Not Found Errors (404)
+
+| Message | Trigger |
+|---------|---------|
+| `"Video not found"` | The video ID is a valid ObjectId but no matching document exists |
+| `"Playlist not found"` | The playlist ID is valid but the playlist has been deleted or never existed |
+| `"Channel does not exist"` | Profile lookup for a username that has no account |
+| `"Playlist not found or you don't have permission to delete it"` | Delete attempted on a non-existent playlist or one owned by another user |
+
+## Conflict Errors (409)
+
+| Message | Trigger |
+|---------|---------|
+| `"User with email or username already exists"` | Registration — email or username is already taken |
+| `"Playlist with the same name already exists in your account"` | Playlist creation — the authenticated user already owns a playlist with that name |
+
+## Internal Server Errors (500)
+
+| Message | Trigger |
+|---------|---------|
+| `"Something went wrong while registering user"` | Database write failure during user creation |
+| `"Something went wrong while generating refresh and access token"` | JWT signing or database failure during token generation |
+| `"Error while uploading an avatar"` | Cloudinary upload for the avatar file failed |
+| `"Error while uploading the thumbnail"` | Cloudinary upload for the video thumbnail failed |
+| `"Failed to delete associated files from cloud storage"` | Cloudinary deletion during video removal failed |

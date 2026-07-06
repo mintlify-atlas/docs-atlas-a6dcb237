@@ -1,0 +1,146 @@
+---
+title: "VideoHub Architecture: Backend and Frontend Overview"
+sidebarTitle: "Architecture"
+description: "VideoHub uses a decoupled monorepo with an Express REST API backend and a React SPA frontend. Learn how the layers fit together."
+---
+
+VideoHub is built as a decoupled, two-layer application living in a single monorepo. The **Backend** is a Node.js/Express 5 REST API that owns all business logic, authentication, and database access. The **Frontend** is a React 19 + Vite single-page application that communicates with the backend exclusively through HTTP. The two layers share no runtime code, which means they can be deployed, scaled, and iterated on independently.
+
+## Directory Structure
+
+```
+VideoHub/
+├── Backend/                  # Node.js + Express REST API
+│   ├── src/
+│   │   ├── controllers/      # Request handlers
+│   │   ├── routes/           # Express routers
+│   │   ├── models/           # Mongoose schemas
+│   │   ├── middlewares/      # Auth, Multer
+│   │   ├── utils/            # ApiError, ApiResponse, Cloudinary, asyncHandler
+│   │   ├── db/               # MongoDB connection
+│   │   ├── app.js            # Express app configuration
+│   │   └── index.js          # Server entry point
+│   ├── public/temp/          # Temp local file storage for Multer
+│   └── Dockerfile
+└── Frontend/                 # React 19 + Vite SPA
+    └── src/
+        ├── components/       # UI components
+        ├── hooks/            # Custom React hooks (API calls)
+        ├── context/          # AuthContext
+        └── utils/
+```
+
+`index.js` is the application entry point. It loads environment variables via `dotenv`, ensures the `public/temp` directory exists (creating it if absent), connects to MongoDB through `connectDB()`, and then starts the HTTP server. The Express app itself is configured separately in `app.js`, which registers the middleware stack and mounts all route modules — keeping server lifecycle concerns separate from application configuration.
+
+## API Route Structure
+
+All API routes are versioned under `/api/v1`. The following base paths are mounted in `app.js`:
+
+| Base path | Responsibility |
+|---|---|
+| `/api/v1/healthcheck` | Server liveness probe |
+| `/api/v1/users` | Registration, login, profile, token refresh |
+| `/api/v1/videos` | Upload, fetch, update, delete, publish toggle |
+| `/api/v1/likes` | Like / unlike videos, comments, and community posts |
+| `/api/v1/comments` | Add, edit, and delete comments on videos |
+| `/api/v1/subscriptions` | Subscribe / unsubscribe to channels |
+| `/api/v1/playlist` | Create and manage playlists |
+| `/api/v1/dashboard` | Channel statistics and video management view |
+| `/api/v1/view` | Record and retrieve video view counts |
+
+## Request Lifecycle
+
+Every inbound request travels through the same layered stack before a response is sent:
+
+<Steps>
+  <Step title="CORS & Cookie Parser">
+    `cors` validates the `Origin` header against `CORS_ORIGIN` and, when `credentials: true`, allows cookies to be included in cross-origin requests. `cookie-parser` then populates `req.cookies` so subsequent middleware can read `accessToken` directly.
+  </Step>
+  <Step title="Body Parsing">
+    `express.json()` (16 kb limit) and `express.urlencoded()` parse the request body into `req.body`. File payloads bypass both and are handled by the Multer middleware on the individual route.
+  </Step>
+  <Step title="Route Matching">
+    Express matches the request path to one of the mounted routers and hands it off to the relevant route handler chain.
+  </Step>
+  <Step title="Auth Middleware">
+    Protected routes run `verifyJwt`, which extracts the JWT from `req.cookies.accessToken` or the `Authorization: Bearer` header, verifies it against `ACCESS_TOKEN_SECRET`, and attaches the resolved user document to `req.user`. Routes that display different content to authenticated vs. guest users run `verifyJWTIfAvailable` instead — it follows the same flow but silently continues on any failure.
+  </Step>
+  <Step title="Controller">
+    The controller function executes business logic: validating inputs, running Mongoose queries or aggregation pipelines against MongoDB, orchestrating Cloudinary uploads where relevant, and constructing the final response.
+  </Step>
+  <Step title="Response">
+    The controller returns a uniform `ApiResponse` or throws an `ApiError`, both of which are described in detail below.
+  </Step>
+</Steps>
+
+## Response Format
+
+Every successful response and every error produced by the API conforms to a predictable shape, constructed by `ApiResponse` and `ApiError` respectively.
+
+**Success — `ApiResponse`**
+
+```js
+// statusCode < 400 → success: true
+{
+  statusCode: 200,
+  data: { /* resource or result */ },
+  message: "Videos fetched successfully",
+  success: true
+}
+```
+
+**Error — `ApiError`**
+
+```js
+// Thrown as an exception; Express error handler serialises it
+{
+  statusCode: 400,
+  message: "Title is required",
+  success: false,
+  errors: [],
+  data: null
+}
+```
+
+`ApiError` extends the native `Error` class. When no custom `stack` string is provided the constructor calls `Error.captureStackTrace` so that V8 stack frames point to the throw site, not to internal Error internals.
+
+```js
+// Throwing an error inside a controller
+throw new ApiError(400, "Title is required");
+
+// Sending a success response
+return res
+  .status(200)
+  .json(new ApiResponse(200, video, "Video fetched successfully"));
+```
+
+## Data Models
+
+VideoHub's MongoDB collections map to the following Mongoose models:
+
+<CardGroup cols={2}>
+  <Card title="User" icon="user">
+    Stores credentials (bcrypt-hashed password), profile metadata (avatar, cover image, fullName), watch history references, and the persisted refresh token.
+  </Card>
+  <Card title="Video" icon="video">
+    Tracks the Cloudinary video and thumbnail URLs, duration, publish status (`isPublished`), owner reference, and view count.
+  </Card>
+  <Card title="Comment" icon="message">
+    Links a text body to a parent video and the author User.
+  </Card>
+  <Card title="Like" icon="thumbs-up">
+    Polymorphic — a single Like document can reference a video, a comment, or a community post via nullable foreign keys.
+  </Card>
+  <Card title="Subscription" icon="bell">
+    Represents a follower → channel relationship between two User documents.
+  </Card>
+  <Card title="Playlist" icon="list">
+    Belongs to an owner User and holds an ordered array of Video references.
+  </Card>
+  <Card title="View" icon="eye">
+    Records individual video view events, enabling deduplication and analytics.
+  </Card>
+  <Card title="Community (Tweet)" icon="newspaper">
+    Short-form text posts published on a user's channel page, modelled similarly to tweets.
+  </Card>
+</CardGroup>

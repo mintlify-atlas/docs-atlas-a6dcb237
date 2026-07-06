@@ -1,0 +1,134 @@
+---
+title: "Environment Variables Reference for VideoHub"
+sidebarTitle: "Environment Variables"
+description: "Complete reference for all VideoHub backend environment variables: server, database, JWT, Cloudinary, and default asset configuration."
+---
+
+All runtime configuration for the VideoHub backend is supplied through environment variables loaded from a `.env` file located in the `Backend/` directory. The server uses the `dotenv` package (called in `src/index.js`) to populate `process.env` before any application code runs, which means every variable listed here must be present before starting the server.
+
+## Creating your `.env` file
+
+A `.env.sample` file is included in the repository with all required keys and safe placeholder values. Copy it to create your local configuration:
+
+```bash
+cd Backend
+cp .env.sample .env
+```
+
+Edit the resulting `.env` file and fill in every blank value before running the server.
+
+---
+
+## Variable Reference
+
+<ParamField path="PORT" type="number" default="5000">
+  The TCP port the Express server binds to. The server falls back to `8000` if this variable is absent, but the sample file ships with `5000` as the conventional default. Change this if another process is already using the port.
+</ParamField>
+
+<ParamField path="HOST" type="string" default="0.0.0.0">
+  The network interface address the server listens on. `0.0.0.0` binds to all available interfaces, which is correct for most Docker and cloud deployments. Use `127.0.0.1` to restrict access to localhost only during development.
+</ParamField>
+
+<ParamField path="CORS_ORIGIN" type="string" required>
+  The single origin that is allowed to make cross-origin requests to the API. The value is passed directly to the `cors` middleware as the `origin` option. During local development this should match your frontend dev server — the Vite default is `http://localhost:5173`.
+
+  Example: `http://localhost:5173`
+</ParamField>
+
+<ParamField path="MONGODB_URL" type="string" required>
+  The full MongoDB connection string. Accepts both MongoDB Atlas connection strings and local `mongodb://` URIs.
+
+  Example (Atlas): `mongodb+srv://<username>:<db_password>@cluster0.ikrv56o.mongodb.net`  
+  Example (local): `mongodb://127.0.0.1:27017/videohub`
+</ParamField>
+
+<ParamField path="ACCESS_TOKEN_SECRET" type="string" required>
+  A long, random secret used to sign JWT access tokens via `jsonwebtoken`. This value is read by `userSchema.methods.generateAccessToken` in `user.models.js` and verified by the `verifyJwt` middleware. Keep this value private and unique per environment.
+</ParamField>
+
+<ParamField path="ACCESS_TOKEN_EXPIRY" type="string" default="1d">
+  Controls how long a JWT access token remains valid. Accepts any value supported by the `jsonwebtoken` `expiresIn` option — for example `1d` (one day), `12h` (twelve hours), or `30m` (thirty minutes). Shorter values improve security but require more frequent token refreshes.
+</ParamField>
+
+<ParamField path="REFRESH_TOKEN_SECRET" type="string" required>
+  A long, random secret used to sign JWT refresh tokens. Should be different from `ACCESS_TOKEN_SECRET`. Refresh tokens are stored in the database (`user.refreshToken` field) and are invalidated on logout by setting the field to `undefined`.
+</ParamField>
+
+<ParamField path="REFRESH_TOKEN_EXPIRY" type="string" default="10d">
+  Controls how long a JWT refresh token remains valid. Accepts the same format as `ACCESS_TOKEN_EXPIRY`. The default of `10d` keeps users logged in for ten days before they must re-authenticate.
+</ParamField>
+
+<ParamField path="DEFAULT_AVATAR" type="string" required>
+  A Cloudinary URL pointing to the default profile picture shown when a user registers without uploading an avatar. The `registerUser` controller reads this value from `process.env.DEFAULT_AVATAR` and stores it directly in the new user document.
+
+  Example: `https://res.cloudinary.com/<cloud_name>/image/upload/v1/defaults/avatar.png`
+</ParamField>
+
+<ParamField path="DEFAULT_COVER_IMAGE" type="string" required>
+  A Cloudinary URL pointing to the default channel cover image assigned to every new user at registration. Follows the same pattern as `DEFAULT_AVATAR`.
+
+  Example: `https://res.cloudinary.com/<cloud_name>/image/upload/v1/defaults/cover.png`
+</ParamField>
+
+<ParamField path="CLOUDINARY_API_KEY" type="string" required>
+  Your Cloudinary account's API key, found in the Cloudinary Dashboard under **Settings → API Keys**. Used by the `uploadOnCloudinary` utility to authenticate upload requests.
+</ParamField>
+
+<ParamField path="CLOUDINARY_SECRET_KEY" type="string" required>
+  Your Cloudinary API secret. Treat this like a password — never expose it in client-side code or commit it to version control.
+</ParamField>
+
+<ParamField path="CLOUDINARY_CLOUD_NAME" type="string" required>
+  Your Cloudinary cloud name, visible at the top of the Cloudinary Dashboard. This is the subdomain component of all Cloudinary asset URLs (e.g. `my-cloud` in `https://res.cloudinary.com/my-cloud/...`).
+</ParamField>
+
+---
+
+## Complete example `.env`
+
+The following shows a fully-populated file with placeholder values. Replace every angle-bracket value with your real credentials before starting the server.
+
+```ini
+# Server
+PORT=5000
+HOST=0.0.0.0
+
+# CORS
+CORS_ORIGIN=http://localhost:5173
+
+# Database
+MONGODB_URL=mongodb+srv://myuser:mypassword@cluster0.ikrv56o.mongodb.net/videohub
+
+# JWT — access token
+ACCESS_TOKEN_SECRET=replace_with_a_long_random_hex_string_access
+ACCESS_TOKEN_EXPIRY=1d
+
+# JWT — refresh token
+REFRESH_TOKEN_SECRET=replace_with_a_different_long_random_hex_string_refresh
+REFRESH_TOKEN_EXPIRY=10d
+
+# Default assets (Cloudinary URLs)
+DEFAULT_AVATAR=https://res.cloudinary.com/your-cloud-name/image/upload/v1/defaults/avatar.png
+DEFAULT_COVER_IMAGE=https://res.cloudinary.com/your-cloud-name/image/upload/v1/defaults/cover.png
+
+# Cloudinary credentials
+CLOUDINARY_API_KEY=123456789012345
+CLOUDINARY_SECRET_KEY=abcDefGhiJkLmNoPqRsTuVwXyZ0
+CLOUDINARY_CLOUD_NAME=your-cloud-name
+```
+
+---
+
+<Warning>
+  Never commit your `.env` file to version control. It contains database credentials, JWT secrets, and Cloudinary API keys that grant full access to your backend and storage. The file is already listed in `.gitignore` — do not remove that entry.
+</Warning>
+
+<Tip>
+  Generate cryptographically strong JWT secrets with Node.js directly from your terminal:
+
+  ```bash
+  node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+  ```
+
+  Run this command twice to produce two independent secrets — one for `ACCESS_TOKEN_SECRET` and one for `REFRESH_TOKEN_SECRET`.
+</Tip>

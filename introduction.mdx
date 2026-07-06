@@ -1,0 +1,96 @@
+---
+title: "VideoHub: Open-Source Video Sharing Platform"
+sidebarTitle: "Introduction"
+description: "VideoHub is an open-source full-stack video sharing platform combining YouTube-style hosting and Twitter-style community features on Express and MongoDB."
+---
+
+VideoHub is an open-source, full-stack video sharing platform that blends YouTube-style video hosting with Twitter-style social interactions — all in a single cohesive application. Developers can self-host the entire stack, extend the REST API with new routes and models, or use it as a reference architecture for building media-driven platforms on Node.js, Express 5, and MongoDB.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Video Hosting" icon="video">
+    Upload, stream, and manage videos through Cloudinary. Multer handles multipart uploads server-side, and the API exposes full CRUD for video resources including title, description, thumbnail, and view tracking.
+  </Card>
+  <Card title="JWT Authentication" icon="lock">
+    Stateless auth with short-lived access tokens and long-lived refresh tokens. Tokens are issued as both secure HTTP-only cookies and JSON response fields, giving clients flexibility on how they store credentials.
+  </Card>
+  <Card title="Social Interactions" icon="heart">
+    Users can like videos and comments, post threaded comments, and subscribe to channels. Mongoose aggregation pipelines power subscriber counts and liked-content feeds.
+  </Card>
+  <Card title="Playlists" icon="list">
+    Create, update, and delete playlists. Add or remove individual videos. Playlists are tied to a user's account and exposed through a dedicated REST resource.
+  </Card>
+  <Card title="Channel Dashboard" icon="chart-bar">
+    Each user has a channel dashboard surfacing total video views, subscriber count, total likes, and a full list of uploaded videos — all computed server-side via MongoDB aggregations.
+  </Card>
+  <Card title="Watch History" icon="clock-rotate-left">
+    View endpoints automatically record watch events per user. History is stored per-account and retrievable through the user profile API so the frontend can render a personalised "continue watching" feed.
+  </Card>
+</CardGroup>
+
+## Tech Stack
+
+### Backend
+
+| Package | Version | Role |
+|---|---|---|
+| Express | ^5.1.0 | HTTP server and routing framework |
+| Mongoose | ^8.15.0 | MongoDB ODM with schema validation |
+| mongoose-aggregate-paginate-v2 | ^1.1.4 | Cursor-based pagination for aggregate queries |
+| Cloudinary SDK | ^2.7.0 | Cloud media storage and transformation |
+| Multer | ^2.0.1 | Multipart form-data (file upload) middleware |
+| bcrypt | ^6.0.0 | Password hashing |
+| jsonwebtoken | ^9.0.2 | JWT signing and verification |
+| cookie-parser | ^1.4.7 | Parse cookies from incoming requests |
+| dotenv | ^16.5.0 | Environment variable loading |
+| cors | ^2.8.5 | Cross-origin resource sharing middleware |
+
+### Frontend
+
+| Package | Version | Role |
+|---|---|---|
+| React | ^19.1.0 | UI component library |
+| Vite | ^7.0.4 | Build tool and dev server |
+| Tailwind CSS | ^4.1.11 | Utility-first styling |
+| Framer Motion | ^12.42.1 | Animation and transitions |
+| Axios | ^1.10.0 | HTTP client for API calls |
+| React Router | ^7.7.0 | Client-side routing |
+
+## Architecture Overview
+
+VideoHub is organised as a monorepo with two top-level directories:
+
+```
+VideoHub/
+├── Backend/          # Node.js REST API (Express 5 + MongoDB)
+│   ├── src/
+│   │   ├── index.js         # Entry point — loads env, checks temp dir, connects DB, starts server
+│   │   ├── app.js           # Express app — middleware stack and route mounting
+│   │   ├── db/index.js      # Mongoose connection helper
+│   │   ├── routes/          # One file per resource (users, videos, likes, …)
+│   │   ├── controllers/     # Business logic for each route
+│   │   ├── models/          # Mongoose schemas
+│   │   └── middlewares/     # Auth guard, Multer config, error handlers
+│   ├── Dockerfile
+│   └── .env.sample
+└── Frontend/         # React 19 SPA (Vite + Tailwind)
+    ├── src/
+    │   ├── pages/           # Route-level page components
+    │   ├── components/      # Reusable UI components
+    │   └── api/             # Axios instances and request helpers
+    └── vite.config.js
+```
+
+The backend exposes a versioned REST API under `/api/v1/`. Every resource — users, videos, likes, comments, subscriptions, playlists, dashboard, watch history, and healthcheck — is mounted as its own Express router. The frontend communicates exclusively through this API, so the two halves can be deployed independently or containerised separately.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Clone the repo, configure your environment, and make your first API call in five minutes.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore every endpoint — authentication, videos, playlists, comments, subscriptions, and more.
+  </Card>
+</CardGroup>

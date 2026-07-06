@@ -1,0 +1,186 @@
+---
+title: "Deploy VideoHub Backend with Docker"
+sidebarTitle: "Deployment"
+description: "Build and run the VideoHub backend using the included Dockerfile, or deploy to any Node.js-compatible cloud platform with environment variables."
+---
+
+The VideoHub backend ships with a production-ready `Dockerfile` that packages the Node.js API into a lightweight Alpine Linux container. You can run it anywhere Docker is available — a local machine, a VPS, a managed container service like AWS ECS, Google Cloud Run, or Railway — without modifying a single line of application code. All runtime configuration is supplied through environment variables at container start time.
+
+## Docker Deployment
+
+<Steps>
+  <Step title="Build the Docker image">
+    From the `Backend/` directory, build the image and tag it as `videohub-backend`:
+
+    ```bash
+    docker build -t videohub-backend .
+    ```
+
+    Docker will pull `node:26.4.0-alpine`, install dependencies via `npm ci`, and copy the application source into the image. Subsequent builds reuse the dependency layer as long as `package.json` and `package-lock.json` have not changed.
+  </Step>
+
+  <Step title="Run the container">
+    Start the container and pass all required environment variables with `-e` flags:
+
+    ```bash
+    docker run -d \
+      --name videohub \
+      -p 5000:5000 \
+      -e PORT=5000 \
+      -e HOST=0.0.0.0 \
+      -e CORS_ORIGIN=https://your-frontend-domain.com \
+      -e MONGODB_URL="mongodb+srv://<username>:<db_password>@cluster0.ikrv56o.mongodb.net" \
+      -e ACCESS_TOKEN_SECRET="your-long-random-access-secret" \
+      -e ACCESS_TOKEN_EXPIRY=1d \
+      -e REFRESH_TOKEN_SECRET="your-long-random-refresh-secret" \
+      -e REFRESH_TOKEN_EXPIRY=10d \
+      -e DEFAULT_AVATAR="https://res.cloudinary.com/your-cloud/image/upload/default_avatar.jpg" \
+      -e DEFAULT_COVER_IMAGE="https://res.cloudinary.com/your-cloud/image/upload/default_cover.jpg" \
+      -e CLOUDINARY_API_KEY="your-cloudinary-api-key" \
+      -e CLOUDINARY_SECRET_KEY="your-cloudinary-api-secret" \
+      -e CLOUDINARY_CLOUD_NAME="your-cloud-name" \
+      videohub-backend
+    ```
+
+    The `-p 5000:5000` flag maps port 5000 on the host to port 5000 inside the container. Adjust the host-side port if that port is already occupied.
+  </Step>
+
+  <Step title="Verify the deployment">
+    Confirm the container is healthy:
+
+    ```bash
+    curl http://localhost:5000/api/v1/healthcheck
+    ```
+
+    Expected response:
+
+    ```json
+    {
+      "statusCode": 200,
+      "data": "OK",
+      "message": "Health check passed"
+    }
+    ```
+
+    You can also inspect container logs with:
+
+    ```bash
+    docker logs videohub
+    ```
+  </Step>
+</Steps>
+
+## Dockerfile Details
+
+Here is the complete `Dockerfile` included in `Backend/`:
+
+```dockerfile
+# Use your specific Node version on lightweight Alpine Linux
+FROM node:26.4.0-alpine
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy ONLY package files first to leverage Docker's layer caching
+COPY package*.json ./
+
+# Install dependencies using ci (clean install) for deterministic builds
+RUN npm ci
+
+# Copy the rest of your backend code into the container
+COPY . .
+
+# Expose port 5000 exactly as configured in your environment
+EXPOSE 5000
+
+# Start the application using your standard npm script
+CMD ["npm", "start"]
+```
+
+Each instruction serves a specific purpose:
+
+- **`FROM node:26.4.0-alpine`** — pins an exact Node.js version on Alpine Linux to keep the image small (around 180 MB) and to guarantee reproducible builds.
+- **`WORKDIR /app`** — all subsequent commands run relative to `/app` inside the container.
+- **`COPY package*.json ./` then `RUN npm ci`** — copying only the manifest files first means Docker caches the installed `node_modules` layer. A code-only change skips the `npm ci` step entirely, making iterative builds much faster.
+- **`npm ci`** — performs a clean install from `package-lock.json`, giving the same dependency tree every time.
+- **`COPY . .`** — copies application source after dependencies are installed.
+- **`EXPOSE 5000`** — documents the port; the actual binding is handled by `docker run -p`.
+- **`CMD ["npm", "start"]`** — runs `node src/index.js`, which loads `.env` (or environment variables), validates the temp directory, connects to MongoDB, then starts the Express server.
+
+## Environment Variables Reference
+
+All configuration is driven by environment variables. There are no hard-coded defaults in production code beyond the fallback port.
+
+| Variable | Required | Description |
+|---|---|---|
+| `PORT` | Yes | Port the Express server listens on. Must match the Docker `-p` mapping. |
+| `HOST` | No | Network interface to bind. Defaults to `0.0.0.0` (all interfaces). |
+| `CORS_ORIGIN` | Yes | Exact origin allowed by the CORS middleware (e.g. `https://app.example.com`). |
+| `MONGODB_URL` | Yes | Full MongoDB connection string. The database name is appended automatically by the app. |
+| `ACCESS_TOKEN_SECRET` | Yes | Secret used to sign short-lived JWT access tokens. Use a long random string. |
+| `ACCESS_TOKEN_EXPIRY` | Yes | Lifetime of the access token (e.g. `1d`, `15m`). |
+| `REFRESH_TOKEN_SECRET` | Yes | Secret used to sign long-lived JWT refresh tokens. Must differ from `ACCESS_TOKEN_SECRET`. |
+| `REFRESH_TOKEN_EXPIRY` | Yes | Lifetime of the refresh token (e.g. `10d`). |
+| `DEFAULT_AVATAR` | No | Cloudinary URL used as the avatar when a user registers without uploading one. |
+| `DEFAULT_COVER_IMAGE` | No | Cloudinary URL used as the channel cover image when none is provided. |
+| `CLOUDINARY_API_KEY` | Yes | API key from your Cloudinary dashboard. |
+| `CLOUDINARY_SECRET_KEY` | Yes | API secret from your Cloudinary dashboard. |
+| `CLOUDINARY_CLOUD_NAME` | Yes | Your Cloudinary cloud name (subdomain). |
+
+## Manual (Non-Docker) Deployment
+
+If you prefer to run directly on a VPS or PaaS platform without Docker, follow these steps:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/barcode8/VideoHub.git
+    cd VideoHub/Backend
+    ```
+  </Step>
+
+  <Step title="Install production dependencies">
+    ```bash
+    npm install
+    ```
+  </Step>
+
+  <Step title="Set environment variables">
+    Create a `.env` file (or export variables through your platform's secrets manager) with all the values listed in the table above. At minimum you must provide `MONGODB_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, and all three Cloudinary credentials.
+
+    ```bash
+    cp .env.sample .env
+    # Edit .env with your values
+    ```
+  </Step>
+
+  <Step title="Start the server">
+    ```bash
+    npm start
+    ```
+
+    This runs `node src/index.js` directly. For process management and automatic restarts on crash, wrap the command with a process manager such as [PM2](https://pm2.keymetrics.io/):
+
+    ```bash
+    pm2 start npm --name "videohub" -- start
+    pm2 save
+    pm2 startup
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Never commit your `.env` file to version control or expose your JWT secrets publicly. A leaked `ACCESS_TOKEN_SECRET` or `REFRESH_TOKEN_SECRET` allows anyone to forge valid authentication tokens for any user account. Rotate both secrets immediately if they are ever compromised and invalidate all active sessions.
+</Warning>
+
+## Production Checklist
+
+<Note>
+  Before going live, verify the following:
+
+  - **CORS origin** — set `CORS_ORIGIN` to your exact frontend domain (e.g. `https://videohub.example.com`). A wildcard `*` will break cookie-based authentication because `credentials: true` and wildcard origins are incompatible.
+  - **Strong JWT secrets** — generate both secrets with `openssl rand -hex 64` and store them in a secrets manager, not in plain text files.
+  - **HTTPS termination** — run the Express server behind a reverse proxy (nginx, Caddy, or a cloud load balancer) that terminates TLS. HTTP-only cookies set without `secure: true` at the application layer are acceptable when TLS is handled upstream, but confirm your proxy forwards the correct protocol headers.
+  - **MongoDB network access** — restrict your Atlas cluster's IP access list to only the IP addresses of your production servers.
+  - **Cloudinary upload presets** — consider restricting unsigned uploads in your Cloudinary settings to prevent unauthenticated media uploads directly to your cloud.
+</Note>

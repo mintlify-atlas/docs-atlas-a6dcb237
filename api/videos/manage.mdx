@@ -1,0 +1,371 @@
+---
+title: "Fetch, Update, Delete, and Toggle Video Visibility"
+sidebarTitle: "Manage Videos"
+description: "Retrieve a single video with like count and owner details, update its metadata, delete it from the platform, or toggle its publish status."
+---
+
+Once a video is on the platform, VideoHub provides endpoints to fetch its full details — including like counts and ownership info — update its metadata, remove it entirely from both the database and Cloudinary, or flip its visibility between published and hidden. Write operations (update, delete, toggle) require authentication and are restricted to the video's owner.
+
+---
+
+## GET /api/v1/videos/:videoId
+
+Fetches a single video document enriched with owner details, total like count, and — when a valid JWT is present — whether the requesting user has liked the video.
+
+**Authentication:** Optional (`verifyJWTIfAvailable`)
+
+### Path Parameters
+
+<ParamField path="videoId" type="string" required>
+  The MongoDB ObjectId of the video to retrieve.
+</ParamField>
+
+### Errors
+
+| Status | Cause |
+|--------|-------|
+| `400`  | `videoId` is not a valid MongoDB ObjectId format |
+| `404`  | No video found with the given ID |
+
+### Response
+
+<ResponseField name="_id" type="string">
+  The unique MongoDB ObjectId of the video.
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  The display title of the video.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  The video description.
+</ResponseField>
+
+<ResponseField name="videoFile" type="string">
+  Cloudinary URL pointing to the video file. Will read `"processing"` while the background upload is still in progress.
+</ResponseField>
+
+<ResponseField name="thumbnail" type="string">
+  Cloudinary URL pointing to the thumbnail image. Will read `"processing"` while the background upload is still in progress.
+</ResponseField>
+
+<ResponseField name="duration" type="number">
+  Video length in seconds as reported by Cloudinary. Reads `0` while processing.
+</ResponseField>
+
+<ResponseField name="views" type="number">
+  Total view count.
+</ResponseField>
+
+<ResponseField name="isPublished" type="boolean">
+  Whether the video is publicly visible.
+</ResponseField>
+
+<ResponseField name="ownerDetails" type="object">
+  Embedded owner information resolved from the `users` collection.
+
+  <Expandable title="ownerDetails fields">
+    <ResponseField name="ownerDetails._id" type="string">
+      The owner's MongoDB ObjectId.
+    </ResponseField>
+    <ResponseField name="ownerDetails.username" type="string">
+      The owner's unique username.
+    </ResponseField>
+    <ResponseField name="ownerDetails.fullName" type="string">
+      The owner's display name.
+    </ResponseField>
+    <ResponseField name="ownerDetails.avatar" type="string">
+      Cloudinary URL for the owner's profile avatar.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="likesCount" type="number">
+  Total number of likes the video has received.
+</ResponseField>
+
+<ResponseField name="isLiked" type="boolean">
+  `true` if the authenticated requester has liked this video; `false` if they have not or if the request was unauthenticated.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the document was created.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 timestamp of the most recent document update.
+</ResponseField>
+
+### Example
+
+```bash
+curl -X GET "https://api.videohub.example/api/v1/videos/6657f3c2a4e1b2c3d4e5f601" \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "_id": "6657f3c2a4e1b2c3d4e5f601",
+    "title": "My First Vlog",
+    "description": "A quick trip through the city.",
+    "videoFile": "https://res.cloudinary.com/demo/video/upload/v1/myvideo.mp4",
+    "thumbnail": "https://res.cloudinary.com/demo/image/upload/v1/mythumb.jpg",
+    "duration": 312.5,
+    "views": 1024,
+    "isPublished": true,
+    "ownerDetails": {
+      "_id": "6657f3c2a4e1b2c3d4e5f600",
+      "username": "alexvlogs",
+      "fullName": "Alex Johnson",
+      "avatar": "https://res.cloudinary.com/demo/image/upload/v1/avatar.jpg"
+    },
+    "likesCount": 87,
+    "isLiked": true,
+    "createdAt": "2025-01-15T10:30:00.000Z",
+    "updatedAt": "2025-01-15T10:32:45.000Z"
+  },
+  "message": "Video fetched successfully"
+}
+```
+
+---
+
+## PATCH /api/v1/videos/:videoId
+
+Updates one or more metadata fields on an existing video. All body fields are optional, but **at least one** must be supplied. When a new thumbnail is provided, the old one is automatically removed from Cloudinary before the new URL is saved.
+
+**Authentication:** Required (`verifyJwt`)
+
+<Note>
+  Only `title`, `description`, and `thumbnail` can be changed via this endpoint. To change the actual video file you must delete the video and re-upload it using the two-step publish flow.
+</Note>
+
+### Path Parameters
+
+<ParamField path="videoId" type="string" required>
+  The MongoDB ObjectId of the video to update.
+</ParamField>
+
+### Request Body (multipart/form-data)
+
+<ParamField body="title" type="string">
+  Replacement title for the video. Ignored if empty or whitespace-only.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Replacement description for the video. Ignored if empty or whitespace-only.
+</ParamField>
+
+<ParamField body="thumbnail" type="file">
+  A new thumbnail image. When provided, the existing thumbnail is deleted from Cloudinary and replaced with the newly uploaded one.
+</ParamField>
+
+### Errors
+
+| Status | Cause |
+|--------|-------|
+| `400`  | `videoId` is not a valid ObjectId format, or no valid update fields were provided |
+| `404`  | No video found with the given ID |
+
+### Response
+
+Returns the full updated video document (post-update snapshot from MongoDB).
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "_id": "6657f3c2a4e1b2c3d4e5f601",
+    "title": "My First Vlog — Director's Cut",
+    "description": "An extended trip through the city with bonus footage.",
+    "videoFile": "https://res.cloudinary.com/demo/video/upload/v1/myvideo.mp4",
+    "thumbnail": "https://res.cloudinary.com/demo/image/upload/v1/newthumb.jpg",
+    "duration": 312.5,
+    "views": 1024,
+    "isPublished": true,
+    "owner": "6657f3c2a4e1b2c3d4e5f600",
+    "createdAt": "2025-01-15T10:30:00.000Z",
+    "updatedAt": "2025-01-15T11:05:22.000Z"
+  },
+  "message": "Video details changed successfully"
+}
+```
+
+### Example
+
+```bash
+# Update the title and swap in a new thumbnail
+curl -X PATCH "https://api.videohub.example/api/v1/videos/6657f3c2a4e1b2c3d4e5f601" \
+  -H "Authorization: Bearer <your_jwt_token>" \
+  -F "title=My First Vlog — Director's Cut" \
+  -F "description=An extended trip through the city with bonus footage." \
+  -F "thumbnail=@/path/to/new-cover.jpg"
+```
+
+---
+
+## DELETE /api/v1/videos/:videoId
+
+Permanently removes a video from the platform. Both the video file and thumbnail are destroyed on Cloudinary before the MongoDB document is deleted.
+
+**Authentication:** Required (`verifyJwt`)
+
+<Warning>
+  This action is irreversible. The video file, thumbnail, and all associated database records are permanently removed. Cloudinary deletion is attempted synchronously — if it fails, a `500` error is returned and the database record is **not** deleted, preserving consistency.
+</Warning>
+
+### Path Parameters
+
+<ParamField path="videoId" type="string" required>
+  The MongoDB ObjectId of the video to delete.
+</ParamField>
+
+### Errors
+
+| Status | Cause |
+|--------|-------|
+| `400`  | `videoId` is not a valid MongoDB ObjectId format |
+| `404`  | No video found with the given ID |
+| `500`  | Cloudinary deletion failed; the database record is preserved |
+
+### Response
+
+Returns the video document as it existed just before deletion.
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "_id": "6657f3c2a4e1b2c3d4e5f601",
+    "title": "My First Vlog",
+    "description": "A quick trip through the city.",
+    "videoFile": "https://res.cloudinary.com/demo/video/upload/v1/myvideo.mp4",
+    "thumbnail": "https://res.cloudinary.com/demo/image/upload/v1/mythumb.jpg",
+    "duration": 312.5,
+    "views": 1024,
+    "isPublished": true,
+    "owner": "6657f3c2a4e1b2c3d4e5f600",
+    "createdAt": "2025-01-15T10:30:00.000Z",
+    "updatedAt": "2025-01-15T10:32:45.000Z"
+  },
+  "message": "Video deleted successfully"
+}
+```
+
+### Example
+
+```bash
+curl -X DELETE "https://api.videohub.example/api/v1/videos/6657f3c2a4e1b2c3d4e5f601" \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+---
+
+## PATCH /api/v1/videos/toggle/publish/:videoId
+
+Flips the `isPublished` flag on a video between `true` and `false`. Only the video's owner can call this endpoint. A hidden video (`isPublished: false`) is excluded from the public feed and returns a `404` for other users fetching it by ID.
+
+**Authentication:** Required (`verifyJwt`)
+
+<Note>
+  This endpoint is mounted at `/toggle/publish/:videoId`, which takes precedence over the generic `/:videoId` route. Make sure to use the full path as shown.
+</Note>
+
+### Path Parameters
+
+<ParamField path="videoId" type="string" required>
+  The MongoDB ObjectId of the video whose publish status should be toggled.
+</ParamField>
+
+### Errors
+
+| Status | Cause |
+|--------|-------|
+| `400`  | `videoId` is not a valid MongoDB ObjectId format |
+| `403`  | The authenticated user is not the owner of the video |
+| `404`  | No video found with the given ID |
+
+### Response
+
+<ResponseField name="isPublished" type="boolean">
+  The new publish status after the toggle — `true` if the video is now public, `false` if it is now hidden.
+</ResponseField>
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "isPublished": false
+  },
+  "message": "Video is now Hidden"
+}
+```
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "isPublished": true
+  },
+  "message": "Video is now Published"
+}
+```
+
+### Example
+
+```bash
+curl -X PATCH "https://api.videohub.example/api/v1/videos/toggle/publish/6657f3c2a4e1b2c3d4e5f601" \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+---
+
+## Video Object Schema
+
+The following fields make up the video document stored in MongoDB and returned by all endpoints in this section.
+
+<ResponseField name="_id" type="string">
+  Unique MongoDB ObjectId identifying the video. Pre-generated by the `POST /api/v1/videos/init` endpoint before the database record is created.
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  The display title of the video. Required.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  A text description of the video's content. Required at upload time; can be updated via the PATCH endpoint.
+</ResponseField>
+
+<ResponseField name="videoFile" type="string">
+  Cloudinary URL for the video file. Populated with `"processing"` while the background upload is running; replaced with the real URL on completion.
+</ResponseField>
+
+<ResponseField name="thumbnail" type="string">
+  Cloudinary URL for the thumbnail image. Populated with `"processing"` while the background upload is running; replaced with the real URL (or an auto-generated still frame) on completion.
+</ResponseField>
+
+<ResponseField name="duration" type="number">
+  Video duration in seconds as reported by Cloudinary. Set to `0` while processing; updated when the background job finishes. Videos exceeding `3600` seconds (1 hour) are rejected and deleted.
+</ResponseField>
+
+<ResponseField name="views" type="number">
+  Total view count. Defaults to `0` on creation.
+</ResponseField>
+
+<ResponseField name="isPublished" type="boolean">
+  Controls public visibility. Set to `false` on initial creation; automatically flipped to `true` once background processing succeeds. Can be toggled manually by the owner.
+</ResponseField>
+
+<ResponseField name="owner" type="string">
+  MongoDB ObjectId referencing the `User` document of the channel that uploaded the video.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp added automatically by Mongoose's `timestamps` option.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 timestamp updated automatically by Mongoose on every document save.
+</ResponseField>

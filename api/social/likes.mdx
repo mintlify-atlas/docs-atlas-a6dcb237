@@ -1,0 +1,243 @@
+---
+title: "Toggle Likes on Videos, Comments, and Community Posts"
+sidebarTitle: "Likes"
+description: "Like or unlike videos, comments, and community posts using toggle endpoints. Get all videos liked by the current user."
+---
+
+Likes in VideoHub are toggle-based — calling a toggle endpoint when the authenticated user has already liked the target resource removes the like (unlike), and calling it when no like exists creates one. There is no separate "like" and "unlike" endpoint; one `POST` handles both transitions and returns the resulting state. All endpoints require a valid JWT in the `Authorization` header.
+
+---
+
+## POST /api/v1/likes/toggle/v/:videoId
+
+Toggles the like state of a video for the currently authenticated user. If the user has already liked the video the like record is deleted and `isLiked: false` is returned. If no like exists a new record is created and `isLiked: true` is returned.
+
+### Path parameters
+
+<ParamField path="videoId" type="string" required>
+  The MongoDB ObjectId of the video to like or unlike. Returns `400` if missing or not a valid ObjectId.
+</ParamField>
+
+### Response
+
+<ResponseField name="isLiked" type="boolean">
+  `true` if the user has just liked the video; `false` if the like was removed.
+</ResponseField>
+
+### Example
+
+```bash
+# Like (or unlike) a video
+curl -X POST "https://api.videohub.com/api/v1/likes/toggle/v/64f1a2b3c4d5e6f7a8b9c0d1" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+**Response — like added:**
+```json
+{
+  "statusCode": 200,
+  "data": { "isLiked": true },
+  "message": "Video liked successfully"
+}
+```
+
+**Response — like removed:**
+```json
+{
+  "statusCode": 200,
+  "data": { "isLiked": false },
+  "message": "Video unliked successfully"
+}
+```
+
+---
+
+## POST /api/v1/likes/toggle/c/:commentId
+
+Toggles the like state of a comment for the currently authenticated user. The behaviour is identical to video likes: one call either creates or deletes the like record and returns the current state.
+
+### Path parameters
+
+<ParamField path="commentId" type="string" required>
+  The MongoDB ObjectId of the comment to like or unlike. Returns `400` if missing or not a valid ObjectId.
+</ParamField>
+
+### Response
+
+<ResponseField name="isLiked" type="boolean">
+  `true` if the user has just liked the comment; `false` if the like was removed.
+</ResponseField>
+
+### Example
+
+```bash
+# Like (or unlike) a comment
+curl -X POST "https://api.videohub.com/api/v1/likes/toggle/c/64f1a2b3c4d5e6f7a8b9c0d2" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+**Response — like added:**
+```json
+{
+  "statusCode": 200,
+  "data": { "isLiked": true },
+  "message": "Comment liked successfully"
+}
+```
+
+**Response — like removed:**
+```json
+{
+  "statusCode": 200,
+  "data": { "isLiked": false },
+  "message": "Comment unliked successfully"
+}
+```
+
+---
+
+## POST /api/v1/likes/toggle/t/:tweetId
+
+Toggles the like state of a community post (internally referred to as a tweet) for the currently authenticated user. The community post ID is stored in the `community` field of the Like document.
+
+### Path parameters
+
+<ParamField path="tweetId" type="string" required>
+  The MongoDB ObjectId of the community post to like or unlike. Returns `400` if missing or not a valid ObjectId.
+</ParamField>
+
+### Response
+
+<ResponseField name="isLiked" type="boolean">
+  `true` if the user has just liked the community post; `false` if the like was removed.
+</ResponseField>
+
+### Example
+
+```bash
+# Like (or unlike) a community post
+curl -X POST "https://api.videohub.com/api/v1/likes/toggle/t/64f1a2b3c4d5e6f7a8b9c0d3" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+**Response — like added:**
+```json
+{
+  "statusCode": 200,
+  "data": { "isLiked": true },
+  "message": "Tweet liked successfully"
+}
+```
+
+**Response — like removed:**
+```json
+{
+  "statusCode": 200,
+  "data": { "isLiked": false },
+  "message": "Tweet unliked successfully"
+}
+```
+
+---
+
+## GET /api/v1/likes/videos
+
+Returns an array of all videos that the currently authenticated user has liked, sorted by most recently liked first. Each entry is a flattened video document that includes the video owner's public profile.
+
+### Parameters
+
+No path, query, or body parameters. The user identity is derived from the JWT.
+
+### Response
+
+Returns an array of video objects. An empty array is returned if the user has not liked any videos.
+
+<ResponseField name="[]._id" type="string">
+  MongoDB ObjectId of the liked video.
+</ResponseField>
+<ResponseField name="[].title" type="string">
+  Title of the video.
+</ResponseField>
+<ResponseField name="[].thumbnail" type="string">
+  URL of the video's thumbnail image.
+</ResponseField>
+<ResponseField name="[].duration" type="number">
+  Duration of the video in seconds.
+</ResponseField>
+<ResponseField name="[].views" type="number">
+  Total view count of the video.
+</ResponseField>
+<ResponseField name="[].ownerDetails" type="object">
+  Public profile of the video's uploader.
+
+  <Expandable title="ownerDetails fields">
+    <ResponseField name="fullName" type="string">Full display name of the video owner.</ResponseField>
+    <ResponseField name="username" type="string">Username handle of the video owner.</ResponseField>
+    <ResponseField name="avatar" type="string">URL of the video owner's avatar image.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="[].createdAt" type="string">
+  ISO 8601 timestamp of when the like was created (i.e. when the user liked the video). Used for sort order.
+</ResponseField>
+
+### Example
+
+```bash
+curl -X GET "https://api.videohub.com/api/v1/likes/videos" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+**Response:**
+```json
+{
+  "statusCode": 200,
+  "data": [
+    {
+      "_id": "64f1a2b3c4d5e6f7a8b9c0d1",
+      "title": "Introduction to Node.js",
+      "thumbnail": "https://cdn.videohub.com/thumbnails/intro-nodejs.jpg",
+      "duration": 3600,
+      "views": 128450,
+      "ownerDetails": {
+        "fullName": "Jane Doe",
+        "username": "janedoe",
+        "avatar": "https://cdn.videohub.com/avatars/janedoe.jpg"
+      },
+      "createdAt": "2024-06-15T10:23:00.000Z"
+    }
+  ],
+  "message": "Liked Videos fetched successfully"
+}
+```
+
+<Note>
+  The `isLiked` flag for a specific video is also included when fetching a video's full details via `GET /api/v1/videos/:videoId`, so you do not need a separate call to the likes API just to check whether the current user has liked a particular video.
+</Note>
+
+---
+
+## Like object schema
+
+The Like document stored in MongoDB is a sparse record — only the field corresponding to the liked resource type (`video`, `comment`, or `community`) is set; the others are left undefined.
+
+<ResponseField name="_id" type="ObjectId">
+  MongoDB-generated unique identifier for the like record.
+</ResponseField>
+<ResponseField name="video" type="ObjectId">
+  Reference to the liked `Video` document. Present only for video likes.
+</ResponseField>
+<ResponseField name="comment" type="ObjectId">
+  Reference to the liked `Comment` document. Present only for comment likes.
+</ResponseField>
+<ResponseField name="community" type="ObjectId">
+  Reference to the liked `Community` (tweet/post) document. Present only for community post likes.
+</ResponseField>
+<ResponseField name="likedBy" type="ObjectId">
+  Reference to the `User` document who created the like.
+</ResponseField>
+<ResponseField name="createdAt" type="Date">
+  Automatically set by Mongoose `timestamps` on document creation.
+</ResponseField>
+<ResponseField name="updatedAt" type="Date">
+  Automatically updated by Mongoose `timestamps` on every save.
+</ResponseField>

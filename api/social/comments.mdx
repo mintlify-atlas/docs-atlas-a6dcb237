@@ -1,0 +1,243 @@
+---
+title: "Video Comments API — List, Add, Edit, Delete"
+sidebarTitle: "Comments"
+description: "Fetch paginated comments on a video, add new comments, edit your own comments, and delete them. All endpoints require authentication."
+---
+
+All comment endpoints require a valid JWT in the `Authorization` header — unauthenticated requests are rejected. Comments are always scoped to a specific video identified by `videoId`. The paginated list endpoint joins owner profile data and live like counts into every comment document so that clients need only one request to render a full comment thread.
+
+---
+
+## GET /api/v1/comments/:videoId
+
+Returns a paginated list of comments for a given video, sorted from newest to oldest. Each comment is enriched with the owner's public profile fields, a total like count, and a per-user `isLiked` flag.
+
+### Path parameters
+
+<ParamField path="videoId" type="string" required>
+  The MongoDB ObjectId of the video whose comments you want to fetch. Returns `400` if the value is missing or not a valid ObjectId.
+</ParamField>
+
+### Query parameters
+
+<ParamField query="page" type="number" default="1">
+  The page of results to return. Must be a positive integer.
+</ParamField>
+
+<ParamField query="limit" type="number" default="10">
+  Maximum number of comments to return per page.
+</ParamField>
+
+### Response
+
+Returns a `mongoose-aggregate-paginate-v2` result envelope containing a `docs` array of comment objects.
+
+<ResponseField name="docs" type="array">
+  Array of comment objects for the requested page.
+
+  <Expandable title="Comment object">
+    <ResponseField name="_id" type="string">
+      Unique identifier of the comment.
+    </ResponseField>
+    <ResponseField name="content" type="string">
+      The text body of the comment.
+    </ResponseField>
+    <ResponseField name="video" type="string">
+      ObjectId of the video this comment belongs to.
+    </ResponseField>
+    <ResponseField name="owner" type="string">
+      ObjectId of the user who authored the comment.
+    </ResponseField>
+    <ResponseField name="ownerDetails" type="object">
+      Resolved public profile of the comment author.
+
+      <Expandable title="ownerDetails fields">
+        <ResponseField name="username" type="string">Username of the comment author.</ResponseField>
+        <ResponseField name="fullName" type="string">Full display name of the comment author.</ResponseField>
+        <ResponseField name="avatar" type="string">URL of the author's avatar image.</ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="likesCount" type="number">
+      Total number of likes on this comment.
+    </ResponseField>
+    <ResponseField name="isLiked" type="boolean">
+      `true` if the currently authenticated user has liked this comment, otherwise `false`.
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp of when the comment was created.
+    </ResponseField>
+    <ResponseField name="updatedAt" type="string">
+      ISO 8601 timestamp of when the comment was last updated.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalDocs" type="number">Total number of comments for this video.</ResponseField>
+<ResponseField name="limit" type="number">The `limit` value used for this page.</ResponseField>
+<ResponseField name="page" type="number">The current page number.</ResponseField>
+<ResponseField name="totalPages" type="number">Total number of available pages.</ResponseField>
+<ResponseField name="hasNextPage" type="boolean">Whether a next page exists.</ResponseField>
+<ResponseField name="hasPrevPage" type="boolean">Whether a previous page exists.</ResponseField>
+
+### Example
+
+```bash
+curl -X GET "https://api.videohub.com/api/v1/comments/64f1a2b3c4d5e6f7a8b9c0d1?page=1&limit=10" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+---
+
+## POST /api/v1/comments/:videoId
+
+Adds a new comment to the specified video. The comment is associated with the authenticated user as owner.
+
+### Path parameters
+
+<ParamField path="videoId" type="string" required>
+  The MongoDB ObjectId of the video to comment on. Returns `400` if missing or invalid.
+</ParamField>
+
+### Body parameters
+
+<ParamField body="content" type="string" required>
+  The text body of the comment. Must be non-empty after trimming whitespace. Returns `400` if absent or blank.
+</ParamField>
+
+### Response
+
+Returns `200` with the newly created comment document.
+
+<ResponseField name="_id" type="string">Unique identifier of the created comment.</ResponseField>
+<ResponseField name="content" type="string">The submitted comment text.</ResponseField>
+<ResponseField name="video" type="string">ObjectId of the video the comment was added to.</ResponseField>
+<ResponseField name="owner" type="string">ObjectId of the authenticated user who created the comment.</ResponseField>
+<ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="updatedAt" type="string">ISO 8601 last-updated timestamp.</ResponseField>
+
+### Errors
+
+| Status | Message |
+|--------|---------|
+| `400` | `"Comment body is mandatory"` — `content` was empty or whitespace-only. |
+| `400` | `"Invalid Video ID format"` — `videoId` is not a valid MongoDB ObjectId. |
+
+### Example
+
+```bash
+curl -X POST "https://api.videohub.com/api/v1/comments/64f1a2b3c4d5e6f7a8b9c0d1" \
+  -H "Authorization: Bearer <your_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Great video, thanks for sharing!"}'
+```
+
+---
+
+## PATCH /api/v1/comments/c/:commentId
+
+Updates the text of an existing comment. Only the user who originally authored the comment may edit it — attempting to edit someone else's comment returns a `400` error.
+
+### Path parameters
+
+<ParamField path="commentId" type="string" required>
+  The MongoDB ObjectId of the comment to update. Returns `400` if missing or invalid.
+</ParamField>
+
+### Body parameters
+
+<ParamField body="content" type="string" required>
+  The new text body to replace the existing comment. Must be non-empty after trimming whitespace.
+</ParamField>
+
+### Response
+
+Returns `200` with the full updated comment document.
+
+<ResponseField name="_id" type="string">Unique identifier of the comment.</ResponseField>
+<ResponseField name="content" type="string">The updated comment text.</ResponseField>
+<ResponseField name="video" type="string">ObjectId of the associated video.</ResponseField>
+<ResponseField name="owner" type="string">ObjectId of the comment author.</ResponseField>
+<ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="updatedAt" type="string">ISO 8601 timestamp of the most recent edit.</ResponseField>
+
+### Errors
+
+| Status | Message |
+|--------|---------|
+| `400` | `"You do not have permission to edit this comment"` — authenticated user is not the comment owner. |
+| `400` | `"Comment body is mandatory"` — `content` was empty or whitespace-only. |
+| `400` | `"Comment could not be found"` — no comment exists with the given `commentId`. |
+| `400` | `"Invalid Comment ID format"` — `commentId` is not a valid MongoDB ObjectId. |
+
+### Example
+
+```bash
+curl -X PATCH "https://api.videohub.com/api/v1/comments/c/64f1a2b3c4d5e6f7a8b9c0d2" \
+  -H "Authorization: Bearer <your_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Updated: this is an even better video!"}'
+```
+
+---
+
+## DELETE /api/v1/comments/c/:commentId
+
+Permanently deletes a comment. Only the comment's original author may delete it. After deletion the comment is removed from the database and associated likes are no longer referenced.
+
+### Path parameters
+
+<ParamField path="commentId" type="string" required>
+  The MongoDB ObjectId of the comment to delete. Returns `400` if missing or invalid.
+</ParamField>
+
+### Response
+
+Returns `200` with an object containing the ID of the deleted comment.
+
+<ResponseField name="deletedCommentId" type="string">
+  The MongoDB ObjectId of the comment that was deleted.
+</ResponseField>
+
+### Errors
+
+| Status | Message |
+|--------|---------|
+| `400` | `"You do not have permission to delete this comment"` — authenticated user is not the comment owner. |
+| `400` | `"Comment could not be found"` — no comment exists with the given `commentId`. |
+| `400` | `"Invalid Comment ID format"` — `commentId` is not a valid MongoDB ObjectId. |
+
+### Example
+
+```bash
+curl -X DELETE "https://api.videohub.com/api/v1/comments/c/64f1a2b3c4d5e6f7a8b9c0d2" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+---
+
+## Comment object schema
+
+The base Comment document stored in MongoDB has the following shape. List responses augment this with the computed fields described above.
+
+<ResponseField name="_id" type="ObjectId">
+  MongoDB-generated unique identifier for the comment.
+</ResponseField>
+<ResponseField name="content" type="string">
+  Text body of the comment. Required and must be non-empty.
+</ResponseField>
+<ResponseField name="video" type="ObjectId">
+  Reference to the `Video` document this comment is attached to.
+</ResponseField>
+<ResponseField name="owner" type="ObjectId">
+  Reference to the `User` document who authored the comment.
+</ResponseField>
+<ResponseField name="createdAt" type="Date">
+  Automatically set by Mongoose `timestamps` on document creation.
+</ResponseField>
+<ResponseField name="updatedAt" type="Date">
+  Automatically updated by Mongoose `timestamps` on every save.
+</ResponseField>
+
+<Note>
+  List responses (`GET /api/v1/comments/:videoId`) include three additional computed fields not stored in the database: `ownerDetails` (username, fullName, avatar), `likesCount`, and `isLiked`. These are resolved at query time via MongoDB aggregation.
+</Note>

@@ -1,0 +1,123 @@
+---
+title: "VideoHub REST API Overview and Base URL"
+sidebarTitle: "Overview"
+description: "All VideoHub endpoints live under /api/v1. Learn the base URL, response envelope, authentication scheme, and pagination pattern used across the API."
+---
+
+VideoHub exposes a versioned REST API built on Node.js, Express 5, and MongoDB. Every resource — from video uploads to channel subscriptions — is accessible through a consistent set of JSON endpoints. All endpoints are mounted under the `/api/v1` prefix, which ensures backward compatibility as the platform evolves.
+
+## Base URL
+
+During local development the server starts on port `5000` by default. All requests must be prefixed with `/api/v1`.
+
+```
+http://localhost:5000/api/v1
+```
+
+When deploying to a remote environment, replace the host and port with your server's address while keeping the `/api/v1` prefix intact.
+
+## API Modules
+
+The API is split into nine focused route groups. Each group handles a distinct area of the platform.
+
+| Module | Base Path | Description |
+|--------|-----------|-------------|
+| Healthcheck | `/api/v1/healthcheck` | Server liveness and status check |
+| Users | `/api/v1/users` | Auth, profile management, and account settings |
+| Videos | `/api/v1/videos` | Upload, fetch, update, and delete videos |
+| Comments | `/api/v1/comments` | Post and manage comments on videos |
+| Likes | `/api/v1/likes` | Like and unlike videos, comments, and posts |
+| Subscriptions | `/api/v1/subscriptions` | Subscribe and unsubscribe to channels |
+| Playlists | `/api/v1/playlist` | Create, update, and manage playlists |
+| Dashboard | `/api/v1/dashboard` | Channel analytics and stats |
+| Views | `/api/v1/view` | Record and track video view counts |
+
+## Response Envelope
+
+Every successful response from the API is wrapped in a standard envelope produced by the `ApiResponse` class. The `success` field is derived automatically — it is `true` when `statusCode` is below 400, and `false` otherwise.
+
+```json
+{
+  "statusCode": 200,
+  "data": { "..." : "..." },
+  "message": "Videos fetched successfully",
+  "success": true
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `statusCode` | `number` | Mirrors the HTTP status code of the response |
+| `data` | `any` | The primary payload — an object, array, or string depending on the endpoint |
+| `message` | `string` | Human-readable description of the outcome |
+| `success` | `boolean` | `true` for 2xx responses, `false` for 4xx/5xx |
+
+<Note>
+  The `data` field may be an empty object `{}`, `null`, or a plain string such as `"OK"` for endpoints that do not return a resource — for example, the healthcheck endpoint.
+</Note>
+
+## Authentication
+
+Most endpoints require a valid JSON Web Token (JWT). The server accepts the token in two ways:
+
+- **Authorization header** — `Authorization: Bearer <accessToken>`
+- **Cookie** — the `accessToken` cookie set automatically after login
+
+The token is verified by the `verifyJwt` middleware. Requests that are missing a token receive a `401` error with the message `"Please login first to perform this action"`. Tokens that are expired or tampered with receive `"Invalid or expired access token"`.
+
+Some read endpoints (such as fetching a video) use the `verifyJWTIfAvailable` middleware, which allows unauthenticated access while still attaching user context when a valid token is present.
+
+For a complete walkthrough of the login flow, token refresh, and logout, see the [Authentication guide](/concepts/authentication).
+
+## Pagination
+
+Endpoints that return lists — such as video feeds, comment threads, and search results — are paginated using `mongoose-aggregate-paginate-v2`. Pass the following query parameters to control the page:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | `integer` | `1` | The page number to retrieve |
+| `limit` | `integer` | `10` | Number of results per page |
+
+The `data` field on paginated responses contains both the result array and pagination metadata provided by the paginator, including `totalDocs`, `totalPages`, `hasNextPage`, and `hasPrevPage`.
+
+```
+GET /api/v1/videos?page=2&limit=15
+```
+
+## Healthcheck Endpoint
+
+The healthcheck route is the simplest endpoint in the API. It requires no authentication and is intended for load balancers, uptime monitors, and deployment pipelines to confirm the server is reachable and running.
+
+```
+GET /api/v1/healthcheck
+```
+
+**Response**
+
+```json
+{
+  "statusCode": 200,
+  "data": {},
+  "message": "Server is healthy and running smoothly",
+  "success": true
+}
+```
+
+A `200` response confirms that the Express application has started and is accepting connections. This endpoint does not check database connectivity.
+
+## Explore the API
+
+<CardGroup cols={2}>
+  <Card title="Users" icon="user" href="/api/users">
+    Registration, login, token refresh, profile updates, and avatar management.
+  </Card>
+  <Card title="Videos" icon="video" href="/api/videos">
+    Upload videos with Cloudinary, fetch feeds, update metadata, and manage publish status.
+  </Card>
+  <Card title="Social Features" icon="heart" href="/api/social">
+    Likes, comments, and channel subscriptions across the platform.
+  </Card>
+  <Card title="Dashboard" icon="chart-bar" href="/api/dashboard">
+    Per-channel analytics including view counts, subscriber counts, and video stats.
+  </Card>
+</CardGroup>

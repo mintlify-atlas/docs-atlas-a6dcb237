@@ -1,0 +1,136 @@
+{
+  "projectType": "saas",
+  "projectName": "VideoHub",
+  "projectDescription": "A full-stack video sharing and social platform combining YouTube-style video hosting with Twitter-style community posts, built on Express, MongoDB, and React.",
+  "theme": "luma",
+  "primaryColor": "#9333ea",
+  "lightColor": "#ec4899",
+  "darkColor": "#6b21a8",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "deployment"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/authentication",
+              "concepts/media-storage"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment",
+              "configuration/cors-and-security"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/errors"
+            ]
+          },
+          {
+            "group": "Users",
+            "pages": [
+              "api/users/register-login",
+              "api/users/profile",
+              "api/users/account-management"
+            ]
+          },
+          {
+            "group": "Videos",
+            "pages": [
+              "api/videos/upload-publish",
+              "api/videos/manage"
+            ]
+          },
+          {
+            "group": "Social Features",
+            "pages": [
+              "api/social/comments",
+              "api/social/likes",
+              "api/social/subscriptions",
+              "api/social/playlists"
+            ]
+          },
+          {
+            "group": "Dashboard",
+            "pages": [
+              "api/dashboard/stats"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "JWT-based authentication with access and refresh tokens",
+    "Video upload with background Cloudinary processing and auto-thumbnail generation",
+    "Paginated video feed with search, sort, and filter support",
+    "Comment system with likes, CRUD operations, and pagination",
+    "Channel subscriptions and subscriber management",
+    "Playlist creation, management, and video organization",
+    "Per-video view tracking",
+    "Channel stats dashboard (subscribers, views, likes, video count)",
+    "React frontend with Tailwind CSS, Framer Motion, and custom hooks",
+    "Dockerized backend for easy deployment"
+  ],
+  "publicApiSurface": [
+    "POST /api/v1/users/register",
+    "POST /api/v1/users/login",
+    "POST /api/v1/users/logout",
+    "POST /api/v1/users/refresh-token",
+    "POST /api/v1/users/change-password",
+    "GET /api/v1/users/current-user",
+    "PATCH /api/v1/users/change-details",
+    "PATCH /api/v1/users/change-avatar",
+    "PATCH /api/v1/users/change-coverimage",
+    "GET /api/v1/users/c/:username",
+    "GET /api/v1/users/watch-history",
+    "GET /api/v1/videos",
+    "POST /api/v1/videos/init",
+    "POST /api/v1/videos/:videoId",
+    "GET /api/v1/videos/:videoId",
+    "PATCH /api/v1/videos/:videoId",
+    "DELETE /api/v1/videos/:videoId",
+    "PATCH /api/v1/videos/toggle/publish/:videoId",
+    "GET /api/v1/comments/:videoId",
+    "POST /api/v1/comments/:videoId",
+    "PATCH /api/v1/comments/c/:commentId",
+    "DELETE /api/v1/comments/c/:commentId",
+    "POST /api/v1/likes/toggle/v/:videoId",
+    "POST /api/v1/likes/toggle/c/:commentId",
+    "POST /api/v1/likes/toggle/t/:tweetId",
+    "GET /api/v1/likes/videos",
+    "GET /api/v1/subscriptions/c/:channelId",
+    "POST /api/v1/subscriptions/c/:channelId",
+    "GET /api/v1/subscriptions/my-subscriptions",
+    "POST /api/v1/playlist",
+    "GET /api/v1/playlist/:playlistId",
+    "PATCH /api/v1/playlist/:playlistId",
+    "DELETE /api/v1/playlist/:playlistId",
+    "PATCH /api/v1/playlist/add/:videoId/:playlistId",
+    "PATCH /api/v1/playlist/remove/:videoId/:playlistId",
+    "GET /api/v1/playlist/user/:userId",
+    "GET /api/v1/dashboard/stats/:channelId",
+    "POST /api/v1/view/:videoId",
+    "GET /api/v1/healthcheck"
+  ]
+}

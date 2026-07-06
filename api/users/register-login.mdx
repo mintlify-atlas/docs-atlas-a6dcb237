@@ -1,0 +1,322 @@
+---
+title: "Register, Login, and Manage Sessions in VideoHub"
+sidebarTitle: "Register & Login"
+description: "Create a new VideoHub account, log in to receive JWT tokens, refresh an expired access token, and log out to invalidate your session."
+---
+
+VideoHub uses a dual-token authentication system: a short-lived **access token** for authorizing requests and a long-lived **refresh token** for obtaining new access tokens without re-entering credentials. Both tokens are issued as `HttpOnly` cookies on login and are also returned in the response body for clients that cannot read cookies directly.
+
+## Endpoints on this page
+
+| Method | Path | Auth Required |
+|--------|------|--------------|
+| `POST` | `/api/v1/users/register` | No |
+| `POST` | `/api/v1/users/login` | No |
+| `POST` | `/api/v1/users/logout` | Yes |
+| `POST` | `/api/v1/users/refresh-token` | No |
+
+---
+
+## Register a new account
+
+`POST /api/v1/users/register`
+
+Creates a new VideoHub user account. Send fields as `multipart/form-data` because the endpoint is wired through Multer and supports optional file uploads (avatar and cover image) in the same request. Passwords are hashed with bcrypt before storage and are never returned in any response.
+
+<Note>
+  Usernames are stored in lowercase and must be unique across the platform. The same uniqueness constraint applies to email addresses.
+</Note>
+
+### Request parameters
+
+<ParamField body="username" type="string" required>
+  Unique handle for the account. Stored in lowercase. Used to identify the user's public channel at `/api/v1/users/c/:username`.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Valid email address. Must be unique across all accounts.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Plain-text password. Hashed with bcrypt (10 salt rounds) before being persisted — never stored in plain text.
+</ParamField>
+
+<ParamField body="fullName" type="string">
+  Display name shown on the channel profile. If omitted, it defaults to the value of `username`.
+</ParamField>
+
+### Response fields
+
+Returns HTTP **201** with a user object. `password` and `refreshToken` are always stripped from the response.
+
+<ResponseField name="statusCode" type="number">
+  Always `200` inside the response envelope (the HTTP status is `201`).
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The newly created user document.
+
+  <Expandable title="data fields">
+    <ResponseField name="_id" type="string">
+      MongoDB ObjectId of the user.
+    </ResponseField>
+    <ResponseField name="username" type="string">
+      Lowercase username.
+    </ResponseField>
+    <ResponseField name="email" type="string">
+      Registered email address.
+    </ResponseField>
+    <ResponseField name="fullName" type="string">
+      Display name (equals `username` if not provided at registration).
+    </ResponseField>
+    <ResponseField name="avatar" type="string">
+      Cloudinary URL of the user's avatar. Set to the platform default on registration.
+    </ResponseField>
+    <ResponseField name="coverImage" type="string">
+      Cloudinary URL of the channel cover image. Set to the platform default on registration.
+    </ResponseField>
+    <ResponseField name="watchHistory" type="array">
+      Array of Video ObjectIds. Empty on a fresh account.
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp of account creation.
+    </ResponseField>
+    <ResponseField name="updatedAt" type="string">
+      ISO 8601 timestamp of last account update.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable confirmation string, e.g. `"User registered successfully"`.
+</ResponseField>
+
+### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| `400`  | One or more of `username`, `email`, or `password` is missing or blank. |
+| `409`  | An account with the same `username` or `email` already exists. |
+| `500`  | An internal error occurred after the document was created (rare). |
+
+### Example
+
+```bash
+curl -X POST http://localhost:5000/api/v1/users/register \
+  -F "username=janedoe" \
+  -F "email=jane@example.com" \
+  -F "password=SuperSecret42" \
+  -F "fullName=Jane Doe"
+```
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "_id": "6650a1f2e4b0c3d9a1234567",
+    "username": "janedoe",
+    "email": "jane@example.com",
+    "fullName": "Jane Doe",
+    "avatar": "https://res.cloudinary.com/demo/image/upload/default_avatar.jpg",
+    "coverImage": "https://res.cloudinary.com/demo/image/upload/default_cover.jpg",
+    "watchHistory": [],
+    "createdAt": "2024-05-24T10:00:00.000Z",
+    "updatedAt": "2024-05-24T10:00:00.000Z"
+  },
+  "message": "User registered sucessfully",
+  "success": true
+}
+```
+
+---
+
+## Log in
+
+`POST /api/v1/users/login`
+
+Authenticates a user with either their `email` or `username` plus their `password`. On success, both an `accessToken` and a `refreshToken` are issued as `HttpOnly` cookies and are also included in the JSON response body for non-browser clients.
+
+<Note>
+  You can supply either `email` or `username` — at least one is required. If both are provided, the server matches against either field.
+</Note>
+
+### Request parameters
+
+<ParamField body="email" type="string">
+  The email address used at registration. Either `email` or `username` must be provided.
+</ParamField>
+
+<ParamField body="username" type="string">
+  The account's username. Either `email` or `username` must be provided.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The account password in plain text. Compared against the stored bcrypt hash.
+</ParamField>
+
+### Response fields
+
+Returns HTTP **200**.
+
+<ResponseField name="data.user" type="object">
+  The authenticated user object with `password` and `refreshToken` omitted.
+</ResponseField>
+
+<ResponseField name="data.accessToken" type="string">
+  Short-lived JWT. Include this in the `Authorization: Bearer <token>` header for protected endpoints. Also set as the `accessToken` `HttpOnly` cookie.
+</ResponseField>
+
+<ResponseField name="data.refreshToken" type="string">
+  Long-lived JWT. Use this to obtain a new access token via `/api/v1/users/refresh-token`. Also set as the `refreshToken` `HttpOnly` cookie.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"User logged in successfully"`
+</ResponseField>
+
+### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| `400`  | Neither `username` nor `email` was provided. |
+| `400`  | No account found matching the provided credentials. |
+| `401`  | Password does not match the stored hash. |
+
+### Example
+
+```bash
+curl -X POST http://localhost:5000/api/v1/users/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "jane@example.com", "password": "SuperSecret42"}'
+```
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "user": {
+      "_id": "6650a1f2e4b0c3d9a1234567",
+      "username": "janedoe",
+      "email": "jane@example.com",
+      "fullName": "Jane Doe",
+      "avatar": "https://res.cloudinary.com/demo/image/upload/default_avatar.jpg",
+      "coverImage": "https://res.cloudinary.com/demo/image/upload/default_cover.jpg",
+      "watchHistory": []
+    },
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  },
+  "message": "User logged in successfully",
+  "success": true
+}
+```
+
+---
+
+## Log out
+
+`POST /api/v1/users/logout`
+
+Terminates the current session. The server clears both `accessToken` and `refreshToken` cookies and sets the stored `refreshToken` field to `undefined` in the database, preventing the old refresh token from being reused.
+
+<Warning>
+  This endpoint requires a valid access token. An expired or missing token returns `401 Unauthorized`.
+</Warning>
+
+### Request parameters
+
+No request body is required. The user identity is derived from the JWT in the `Authorization` header or the `accessToken` cookie.
+
+### Response fields
+
+<ResponseField name="data" type="object">
+  An empty object `{}` — no user data is returned on logout.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"User logged out successfully"`
+</ResponseField>
+
+### Example
+
+```bash
+curl -X POST http://localhost:5000/api/v1/users/logout \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```json
+{
+  "statusCode": 200,
+  "data": {},
+  "message": "User logged out successfully",
+  "success": true
+}
+```
+
+---
+
+## Refresh an access token
+
+`POST /api/v1/users/refresh-token`
+
+Issues a fresh `accessToken` (and rotates the `refreshToken`) without requiring the user to log in again. The endpoint accepts the refresh token from the `refreshToken` cookie or from the request body.
+
+<Tip>
+  Rotate your refresh token on every call. The old token is invalidated once a new pair is issued — storing the latest `newRefreshToken` keeps your session alive without re-authenticating.
+</Tip>
+
+### Request parameters
+
+<ParamField body="refreshToken" type="string">
+  The refresh token string. Required if the `refreshToken` cookie is not present (e.g., in native mobile clients or server-to-server calls).
+</ParamField>
+
+### Response fields
+
+Returns HTTP **200**. New tokens are set as `HttpOnly` cookies (`accessToken`, `refreshToken`) and also returned in the response body.
+
+<ResponseField name="data.accessToken" type="string">
+  The newly generated short-lived access token.
+</ResponseField>
+
+<ResponseField name="data.newRefreshToken" type="string">
+  The newly generated refresh token. Store this and use it for the next refresh call.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"Access token refreshed successfully"`
+</ResponseField>
+
+### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| `401`  | No refresh token found in cookies or request body. |
+| `401`  | The token is malformed, expired, or does not match the one stored in the database. |
+
+### Example
+
+```bash
+# Using the token from a cookie (browser clients handle this automatically)
+curl -X POST http://localhost:5000/api/v1/users/refresh-token \
+  --cookie "refreshToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```bash
+# Passing the token explicitly in the request body (mobile / server-to-server)
+curl -X POST http://localhost:5000/api/v1/users/refresh-token \
+  -H "Content-Type: application/json" \
+  -d '{"refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}'
+```
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "newRefreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  },
+  "message": "Access token refreshed successfully ",
+  "success": true
+}
+```

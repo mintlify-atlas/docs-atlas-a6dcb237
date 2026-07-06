@@ -1,0 +1,342 @@
+---
+title: "Playlists API — Create, Manage, and Organize Videos"
+sidebarTitle: "Playlists"
+description: "Create named playlists, add and remove videos, update playlist metadata, delete playlists, and fetch playlists by user or by ID."
+---
+
+Playlists belong to a user and hold an ordered list of video references. All endpoints require a valid JWT in the `Authorization` header. Only the playlist owner can modify, add videos to, remove videos from, or delete a playlist — operations on playlists owned by other users return an error. Duplicate video entries within a single playlist are prevented at the API level.
+
+---
+
+## POST /api/v1/playlist
+
+Creates a new playlist for the authenticated user. Playlist names must be unique per user — you cannot have two playlists with the same name in your account.
+
+### Body parameters
+
+<ParamField body="name" type="string" required>
+  The name of the new playlist. Must be non-empty. Returns `400` if missing.
+</ParamField>
+
+<ParamField body="description" type="string">
+  An optional description for the playlist.
+</ParamField>
+
+### Response
+
+Returns `200` with the newly created playlist document.
+
+<ResponseField name="_id" type="string">Unique identifier of the created playlist.</ResponseField>
+<ResponseField name="name" type="string">Name of the playlist.</ResponseField>
+<ResponseField name="description" type="string">Description of the playlist (may be absent if not provided).</ResponseField>
+<ResponseField name="videos" type="array">Empty array on creation — no videos are added at this stage.</ResponseField>
+<ResponseField name="owner" type="string">ObjectId of the authenticated user who owns the playlist.</ResponseField>
+<ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="updatedAt" type="string">ISO 8601 last-updated timestamp.</ResponseField>
+
+### Errors
+
+| Status | Message |
+|--------|---------|
+| `409` | `"Playlist with the same name already exists in your account"` — the user already has a playlist with this exact name. |
+| `400` | `"Playlist name is required"` — the `name` field was missing from the request body. |
+
+### Example
+
+```bash
+curl -X POST "https://api.videohub.com/api/v1/playlist" \
+  -H "Authorization: Bearer <your_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Favourite Tutorials", "description": "All the Node.js and React tutorials I keep coming back to."}'
+```
+
+---
+
+## GET /api/v1/playlist/:playlistId
+
+Fetches the full details of a single playlist including the owner's public profile, expanded video documents (each with their own owner details), and a computed `totalVideos` count.
+
+### Path parameters
+
+<ParamField path="playlistId" type="string" required>
+  The MongoDB ObjectId of the playlist to retrieve. Returns `400` if missing or invalid; `404` if no playlist exists with that ID.
+</ParamField>
+
+### Response
+
+Returns an array containing a single enriched playlist object (the aggregation pipeline result).
+
+<ResponseField name="_id" type="string">Unique identifier of the playlist.</ResponseField>
+<ResponseField name="name" type="string">Name of the playlist.</ResponseField>
+<ResponseField name="description" type="string">Description of the playlist.</ResponseField>
+<ResponseField name="owner" type="string">ObjectId of the playlist owner.</ResponseField>
+<ResponseField name="ownerDetails" type="object">
+  Resolved public profile of the playlist owner.
+
+  <Expandable title="ownerDetails fields">
+    <ResponseField name="username" type="string">Username of the playlist owner.</ResponseField>
+    <ResponseField name="fullName" type="string">Full display name of the playlist owner.</ResponseField>
+    <ResponseField name="avatar" type="string">URL of the playlist owner's avatar.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="videos" type="array">
+  Array of expanded video documents in the playlist. Each entry includes the video's own `ownerDetails`.
+
+  <Expandable title="Video entry fields">
+    <ResponseField name="_id" type="string">ObjectId of the video.</ResponseField>
+    <ResponseField name="title" type="string">Title of the video.</ResponseField>
+    <ResponseField name="thumbnail" type="string">Thumbnail URL.</ResponseField>
+    <ResponseField name="duration" type="number">Duration in seconds.</ResponseField>
+    <ResponseField name="views" type="number">Total view count.</ResponseField>
+    <ResponseField name="ownerDetails" type="object">Public profile of the video's uploader (username, fullName, avatar).</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="totalVideos" type="number">
+  Total number of videos currently in the playlist. Computed dynamically via `$size`.
+</ResponseField>
+<ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="updatedAt" type="string">ISO 8601 last-updated timestamp.</ResponseField>
+
+### Example
+
+```bash
+curl -X GET "https://api.videohub.com/api/v1/playlist/64f1a2b3c4d5e6f7a8b9c0d5" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+---
+
+## PATCH /api/v1/playlist/:playlistId
+
+Updates the `name` and/or `description` of an existing playlist. At least one of the two fields must be included in the request body. Only the playlist owner can perform this operation.
+
+### Path parameters
+
+<ParamField path="playlistId" type="string" required>
+  The MongoDB ObjectId of the playlist to update. Returns `400` if missing or invalid; `404` if not found or the authenticated user is not the owner.
+</ParamField>
+
+### Body parameters
+
+<ParamField body="name" type="string">
+  New name for the playlist. Must be non-empty after trimming whitespace if provided.
+</ParamField>
+
+<ParamField body="description" type="string">
+  New description for the playlist.
+</ParamField>
+
+### Response
+
+Returns `200` with an object containing only the fields that were updated.
+
+<ResponseField name="name" type="string">
+  The updated playlist name. Present only if `name` was included in the request.
+</ResponseField>
+<ResponseField name="description" type="string">
+  The updated playlist description. Present only if `description` was included in the request.
+</ResponseField>
+
+### Errors
+
+| Status | Message |
+|--------|---------|
+| `400` | `"Please provide a name or description to update"` — neither `name` nor `description` was provided. |
+| `400` | `"Playlist name cannot be empty"` — `name` was provided but was blank after trimming. |
+| `404` | `"Playlist not found or you don't have permission to update it"` — playlist doesn't exist or the requester is not the owner. |
+
+### Example
+
+```bash
+curl -X PATCH "https://api.videohub.com/api/v1/playlist/64f1a2b3c4d5e6f7a8b9c0d5" \
+  -H "Authorization: Bearer <your_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Must-Watch Tutorials", "description": "Curated list of the best programming tutorials."}'
+```
+
+---
+
+## DELETE /api/v1/playlist/:playlistId
+
+Permanently deletes a playlist and its video reference list. The underlying video documents are not affected — only the playlist record is removed. Only the playlist owner can delete a playlist.
+
+### Path parameters
+
+<ParamField path="playlistId" type="string" required>
+  The MongoDB ObjectId of the playlist to delete. Returns `400` if missing or invalid; `404` if not found or the requester is not the owner.
+</ParamField>
+
+### Response
+
+Returns `200` with the full deleted playlist document as it existed before deletion.
+
+<ResponseField name="_id" type="string">ObjectId of the deleted playlist.</ResponseField>
+<ResponseField name="name" type="string">Name of the deleted playlist.</ResponseField>
+<ResponseField name="description" type="string">Description of the deleted playlist.</ResponseField>
+<ResponseField name="videos" type="array">Array of video ObjectIds that were in the playlist.</ResponseField>
+<ResponseField name="owner" type="string">ObjectId of the playlist owner.</ResponseField>
+<ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="updatedAt" type="string">ISO 8601 last-updated timestamp.</ResponseField>
+
+### Errors
+
+| Status | Message |
+|--------|---------|
+| `404` | `"Playlist not found or you don't have permission to delete it"` — playlist doesn't exist or the requester is not the owner. |
+
+### Example
+
+```bash
+curl -X DELETE "https://api.videohub.com/api/v1/playlist/64f1a2b3c4d5e6f7a8b9c0d5" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+---
+
+## PATCH /api/v1/playlist/add/:videoId/:playlistId
+
+Adds a video to a playlist. The video is appended to the `videos` array using `$push`. The endpoint checks for duplicate entries and rejects the request if the video is already present in the playlist. Only the playlist owner can modify the playlist.
+
+### Path parameters
+
+<ParamField path="videoId" type="string" required>
+  The MongoDB ObjectId of the video to add. Returns `400` if missing or invalid.
+</ParamField>
+
+<ParamField path="playlistId" type="string" required>
+  The MongoDB ObjectId of the target playlist. Returns `400` if missing or invalid.
+</ParamField>
+
+### Response
+
+Returns `200` with the updated playlist document after the video has been added.
+
+<ResponseField name="_id" type="string">ObjectId of the playlist.</ResponseField>
+<ResponseField name="name" type="string">Name of the playlist.</ResponseField>
+<ResponseField name="description" type="string">Description of the playlist.</ResponseField>
+<ResponseField name="videos" type="array">Updated array of video ObjectIds now including the newly added video.</ResponseField>
+<ResponseField name="owner" type="string">ObjectId of the playlist owner.</ResponseField>
+<ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="updatedAt" type="string">ISO 8601 last-updated timestamp.</ResponseField>
+
+### Errors
+
+| Status | Message |
+|--------|---------|
+| `400` | `"This video is already in the playlist"` — the video ObjectId already exists in the `videos` array. |
+| `403` | `"You do not have permission to modify this playlist"` — authenticated user is not the playlist owner. |
+| `400` | `"Playlist not found"` — no playlist exists with the given `playlistId`. |
+
+### Example
+
+```bash
+curl -X PATCH "https://api.videohub.com/api/v1/playlist/add/64f1a2b3c4d5e6f7a8b9c0d1/64f1a2b3c4d5e6f7a8b9c0d5" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+<Warning>
+  Attempting to add the same video twice returns a `400` error. Check `GET /api/v1/playlist/:playlistId` to inspect the current `videos` array before adding if you are unsure whether the video is already present.
+</Warning>
+
+---
+
+## PATCH /api/v1/playlist/remove/:videoId/:playlistId
+
+Removes a video from a playlist using MongoDB's `$pull` operator. Only the playlist owner may perform this operation. If the video is not in the playlist the `$pull` is a no-op and the updated playlist is still returned successfully.
+
+### Path parameters
+
+<ParamField path="videoId" type="string" required>
+  The MongoDB ObjectId of the video to remove. Returns `400` if missing or invalid.
+</ParamField>
+
+<ParamField path="playlistId" type="string" required>
+  The MongoDB ObjectId of the playlist to remove the video from. Returns `400` if missing or invalid.
+</ParamField>
+
+### Response
+
+Returns `200` with the updated playlist document after the video has been removed.
+
+<ResponseField name="_id" type="string">ObjectId of the playlist.</ResponseField>
+<ResponseField name="name" type="string">Name of the playlist.</ResponseField>
+<ResponseField name="description" type="string">Description of the playlist.</ResponseField>
+<ResponseField name="videos" type="array">Updated array of video ObjectIds with the specified video removed.</ResponseField>
+<ResponseField name="owner" type="string">ObjectId of the playlist owner.</ResponseField>
+<ResponseField name="createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="updatedAt" type="string">ISO 8601 last-updated timestamp.</ResponseField>
+
+### Errors
+
+| Status | Message |
+|--------|---------|
+| `403` | `"You do not have permission to modify this playlist"` — authenticated user is not the playlist owner. |
+| `400` | `"Playlist not found"` — no playlist exists with the given `playlistId`. |
+
+### Example
+
+```bash
+curl -X PATCH "https://api.videohub.com/api/v1/playlist/remove/64f1a2b3c4d5e6f7a8b9c0d1/64f1a2b3c4d5e6f7a8b9c0d5" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+---
+
+## GET /api/v1/playlist/user/:userId
+
+Returns all playlists owned by the specified user. This is useful for rendering a user's playlist library on their profile page. The response is the raw playlist documents without expanded video details — use `GET /api/v1/playlist/:playlistId` to fetch a specific playlist with full video data.
+
+### Path parameters
+
+<ParamField path="userId" type="string" required>
+  The MongoDB ObjectId of the user whose playlists you want to list. Returns `400` if missing or not a valid ObjectId.
+</ParamField>
+
+### Response
+
+Returns an array of playlist documents. An empty array is returned if the user has no playlists.
+
+<ResponseField name="[]._id" type="string">ObjectId of the playlist.</ResponseField>
+<ResponseField name="[].name" type="string">Name of the playlist.</ResponseField>
+<ResponseField name="[].description" type="string">Description of the playlist.</ResponseField>
+<ResponseField name="[].videos" type="array">Array of video ObjectIds in the playlist (not expanded).</ResponseField>
+<ResponseField name="[].owner" type="string">ObjectId of the playlist owner.</ResponseField>
+<ResponseField name="[].createdAt" type="string">ISO 8601 creation timestamp.</ResponseField>
+<ResponseField name="[].updatedAt" type="string">ISO 8601 last-updated timestamp.</ResponseField>
+
+### Example
+
+```bash
+curl -X GET "https://api.videohub.com/api/v1/playlist/user/64f1a2b3c4d5e6f7a8b9c0e2" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+---
+
+## Playlist object schema
+
+<ResponseField name="_id" type="ObjectId">
+  MongoDB-generated unique identifier for the playlist.
+</ResponseField>
+<ResponseField name="name" type="string">
+  Required. The display name of the playlist. Must be unique per owner.
+</ResponseField>
+<ResponseField name="description" type="string">
+  Optional free-text description of the playlist.
+</ResponseField>
+<ResponseField name="videos" type="ObjectId[]">
+  Ordered array of references to `Video` documents. Entries are appended with `$push` (add) and removed with `$pull` (remove). Duplicates are rejected at the application layer before any database write.
+</ResponseField>
+<ResponseField name="owner" type="ObjectId">
+  Reference to the `User` document who owns this playlist.
+</ResponseField>
+<ResponseField name="createdAt" type="Date">
+  Automatically set by Mongoose `timestamps` on document creation.
+</ResponseField>
+<ResponseField name="updatedAt" type="Date">
+  Automatically updated by Mongoose `timestamps` on every save.
+</ResponseField>
+
+<Tip>
+  When calling `GET /api/v1/playlist/:playlistId`, the response also includes the computed `ownerDetails` object, a `totalVideos` count, and fully expanded video objects each with their own `ownerDetails`. These fields are not stored in the database — they are resolved at query time via MongoDB aggregation.
+</Tip>

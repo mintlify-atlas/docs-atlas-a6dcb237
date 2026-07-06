@@ -1,0 +1,212 @@
+---
+title: "Channel Subscriptions — Subscribe, Unsubscribe, and List"
+sidebarTitle: "Subscriptions"
+description: "Toggle channel subscriptions, retrieve a channel's subscriber list, and get all channels the current user subscribes to."
+---
+
+Subscriptions model the relationship between a subscriber (a user who follows) and a channel (another user whose content they follow). The toggle endpoint handles both subscribing and unsubscribing in a single call — no separate endpoints are needed. All three endpoints require a valid JWT in the `Authorization` header. A user cannot subscribe to their own channel.
+
+---
+
+## POST /api/v1/subscriptions/c/:channelId
+
+Toggles the subscription state between the authenticated user and the given channel. If a subscription record already exists it is deleted and `isSubscribed: false` is returned. If no subscription exists a new record is created and `isSubscribed: true` is returned.
+
+### Path parameters
+
+<ParamField path="channelId" type="string" required>
+  The MongoDB ObjectId of the user whose channel you want to subscribe to or unsubscribe from. Returns `400` if missing or not a valid ObjectId.
+</ParamField>
+
+### Response
+
+<ResponseField name="isSubscribed" type="boolean">
+  `true` if the user is now subscribed to the channel; `false` if the subscription was removed.
+</ResponseField>
+
+### Errors
+
+| Status | Message |
+|--------|---------|
+| `400` | `"User cannot subscribe to their own channel"` — the authenticated user's ID matches `channelId`. |
+| `400` | `"Invalid Channel ID"` — `channelId` is not a valid MongoDB ObjectId. |
+
+### Example
+
+```bash
+# Subscribe to (or unsubscribe from) a channel
+curl -X POST "https://api.videohub.com/api/v1/subscriptions/c/64f1a2b3c4d5e6f7a8b9c0d4" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+**Response — subscribed:**
+```json
+{
+  "statusCode": 200,
+  "data": { "isSubscribed": true },
+  "message": "Subscribed successfully"
+}
+```
+
+**Response — unsubscribed:**
+```json
+{
+  "statusCode": 200,
+  "data": { "isSubscribed": false },
+  "message": "Unsubscribed successfully"
+}
+```
+
+---
+
+## GET /api/v1/subscriptions/c/:channelId
+
+Returns the full subscriber list for a given channel. Each document in the array includes the subscriber's resolved public profile fields. Results are sorted with most recent subscribers first.
+
+### Path parameters
+
+<ParamField path="channelId" type="string" required>
+  The MongoDB ObjectId of the channel whose subscriber list you want to retrieve. Returns `400` if missing or not a valid ObjectId.
+</ParamField>
+
+### Response
+
+Returns an array of subscription documents. An empty array is returned if the channel has no subscribers.
+
+<ResponseField name="[]._id" type="string">
+  MongoDB ObjectId of the subscription record itself.
+</ResponseField>
+<ResponseField name="[].subscriber" type="string">
+  ObjectId of the subscribing user.
+</ResponseField>
+<ResponseField name="[].channel" type="string">
+  ObjectId of the channel (the user being subscribed to).
+</ResponseField>
+<ResponseField name="[].subscriberDetails" type="object">
+  Resolved public profile of the subscriber.
+
+  <Expandable title="subscriberDetails fields">
+    <ResponseField name="username" type="string">Username handle of the subscriber.</ResponseField>
+    <ResponseField name="fullName" type="string">Full display name of the subscriber.</ResponseField>
+    <ResponseField name="avatar" type="string">URL of the subscriber's avatar image.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="[].createdAt" type="string">
+  ISO 8601 timestamp of when the subscription was created. Used for sort order.
+</ResponseField>
+
+### Example
+
+```bash
+curl -X GET "https://api.videohub.com/api/v1/subscriptions/c/64f1a2b3c4d5e6f7a8b9c0d4" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+**Response:**
+```json
+{
+  "statusCode": 200,
+  "data": [
+    {
+      "_id": "64f1a2b3c4d5e6f7a8b9c0e1",
+      "subscriber": "64f1a2b3c4d5e6f7a8b9c0e2",
+      "channel": "64f1a2b3c4d5e6f7a8b9c0d4",
+      "subscriberDetails": {
+        "username": "johndoe",
+        "fullName": "John Doe",
+        "avatar": "https://cdn.videohub.com/avatars/johndoe.jpg"
+      },
+      "createdAt": "2024-06-10T08:00:00.000Z"
+    }
+  ],
+  "message": "Subscriber list fetched successfully"
+}
+```
+
+---
+
+## GET /api/v1/subscriptions/my-subscriptions
+
+Returns all channels that the currently authenticated user subscribes to. Each document includes the channel's resolved public profile. Results are sorted with most recently subscribed channels first.
+
+### Parameters
+
+No path, query, or body parameters. The subscriber's identity is derived from the JWT.
+
+### Response
+
+Returns an array of subscription documents. An empty array is returned if the user has no active subscriptions.
+
+<ResponseField name="[]._id" type="string">
+  MongoDB ObjectId of the subscription record.
+</ResponseField>
+<ResponseField name="[].subscriber" type="string">
+  ObjectId of the authenticated subscribing user.
+</ResponseField>
+<ResponseField name="[].channel" type="string">
+  ObjectId of the subscribed channel.
+</ResponseField>
+<ResponseField name="[].channelDetails" type="object">
+  Resolved public profile of the subscribed channel's owner.
+
+  <Expandable title="channelDetails fields">
+    <ResponseField name="username" type="string">Username handle of the channel.</ResponseField>
+    <ResponseField name="fullName" type="string">Full display name of the channel owner.</ResponseField>
+    <ResponseField name="avatar" type="string">URL of the channel owner's avatar image.</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="[].createdAt" type="string">
+  ISO 8601 timestamp of when the subscription was created. Used for sort order.
+</ResponseField>
+
+### Example
+
+```bash
+curl -X GET "https://api.videohub.com/api/v1/subscriptions/my-subscriptions" \
+  -H "Authorization: Bearer <your_token>"
+```
+
+**Response:**
+```json
+{
+  "statusCode": 200,
+  "data": [
+    {
+      "_id": "64f1a2b3c4d5e6f7a8b9c0e3",
+      "subscriber": "64f1a2b3c4d5e6f7a8b9c0e2",
+      "channel": "64f1a2b3c4d5e6f7a8b9c0d4",
+      "channelDetails": {
+        "username": "janedoe",
+        "fullName": "Jane Doe",
+        "avatar": "https://cdn.videohub.com/avatars/janedoe.jpg"
+      },
+      "createdAt": "2024-06-12T14:30:00.000Z"
+    }
+  ],
+  "message": "Channel list fetched successfully"
+}
+```
+
+<Note>
+  The `isSubscribed` flag is also returned in channel profile responses from `GET /api/v1/users/c/:username`, so you do not need to call the subscriptions API separately to know whether the current user is already subscribed to a channel they are viewing.
+</Note>
+
+---
+
+## Subscription object schema
+
+<ResponseField name="_id" type="ObjectId">
+  MongoDB-generated unique identifier for the subscription record.
+</ResponseField>
+<ResponseField name="subscriber" type="ObjectId">
+  Reference to the `User` document of the person who is subscribing.
+</ResponseField>
+<ResponseField name="channel" type="ObjectId">
+  Reference to the `User` document of the channel being subscribed to. Both `subscriber` and `channel` reference the same `User` collection.
+</ResponseField>
+<ResponseField name="createdAt" type="Date">
+  Automatically set by Mongoose `timestamps` on document creation.
+</ResponseField>
+<ResponseField name="updatedAt" type="Date">
+  Automatically updated by Mongoose `timestamps` on every save.
+</ResponseField>

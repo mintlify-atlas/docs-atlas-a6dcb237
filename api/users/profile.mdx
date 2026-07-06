@@ -1,0 +1,296 @@
+---
+title: "Get User Profile and Watch History Endpoints"
+sidebarTitle: "Profile"
+description: "Retrieve the current user's info, fetch any public channel profile by username, and get the authenticated user's full watch history."
+---
+
+These endpoints let you retrieve user data from VideoHub. Fetching the currently authenticated user returns the full account document attached to the session. Looking up a channel by username runs a MongoDB aggregation that joins the subscriptions collection to compute live subscriber counts and subscription status. The watch history endpoint performs a nested aggregation to return fully populated video documents — including the owner's profile details — in a single request.
+
+<Note>
+  All three endpoints require a valid access token passed either as an `Authorization: Bearer <token>` header or via the `accessToken` `HttpOnly` cookie set during login.
+</Note>
+
+## Endpoints on this page
+
+| Method | Path | Auth Required |
+|--------|------|--------------|
+| `GET`  | `/api/v1/users/current-user` | Yes |
+| `GET`  | `/api/v1/users/c/:username`  | Yes |
+| `GET`  | `/api/v1/users/watch-history` | Yes |
+
+---
+
+## Get the current user
+
+`GET /api/v1/users/current-user`
+
+Returns the full user document for the account associated with the access token in the current request. The `verifyJwt` middleware decodes the token and attaches the user to `req.user`; this endpoint simply returns that object.
+
+### Request parameters
+
+No parameters. The user is identified entirely from the JWT.
+
+### Response fields
+
+Returns HTTP **200**.
+
+<ResponseField name="data" type="object">
+  The authenticated user document. `password` and `refreshToken` are never included.
+
+  <Expandable title="data fields">
+    <ResponseField name="_id" type="string">
+      MongoDB ObjectId of the user.
+    </ResponseField>
+    <ResponseField name="username" type="string">
+      The account's unique lowercase handle.
+    </ResponseField>
+    <ResponseField name="email" type="string">
+      Registered email address.
+    </ResponseField>
+    <ResponseField name="fullName" type="string">
+      Display name shown on the channel profile.
+    </ResponseField>
+    <ResponseField name="avatar" type="string">
+      Cloudinary URL for the user's avatar image.
+    </ResponseField>
+    <ResponseField name="coverImage" type="string">
+      Cloudinary URL for the channel cover image.
+    </ResponseField>
+    <ResponseField name="watchHistory" type="array">
+      Array of Video ObjectIds representing the user's viewing history.
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 account creation timestamp.
+    </ResponseField>
+    <ResponseField name="updatedAt" type="string">
+      ISO 8601 last-updated timestamp.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"Current user fetched successfully"`
+</ResponseField>
+
+### Example
+
+```bash
+curl -X GET http://localhost:5000/api/v1/users/current-user \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "_id": "6650a1f2e4b0c3d9a1234567",
+    "username": "janedoe",
+    "email": "jane@example.com",
+    "fullName": "Jane Doe",
+    "avatar": "https://res.cloudinary.com/demo/image/upload/avatar.jpg",
+    "coverImage": "https://res.cloudinary.com/demo/image/upload/cover.jpg",
+    "watchHistory": ["6650b2c3e4b0c3d9a7654321"],
+    "createdAt": "2024-05-24T10:00:00.000Z",
+    "updatedAt": "2024-05-25T08:30:00.000Z"
+  },
+  "message": "Current user fetched successfully",
+  "success": true
+}
+```
+
+---
+
+## Get a channel profile
+
+`GET /api/v1/users/c/:username`
+
+Fetches the public profile of any VideoHub channel by username. Internally this runs a MongoDB aggregation pipeline with two `$lookup` stages against the `subscriptions` collection — one to count subscribers (documents where the user is the `channel`) and one to count channels the user is subscribed to (documents where the user is the `subscriber`). An `$addFields` stage then computes `isSubscribed` by checking whether the requesting user's `_id` appears in the subscribers list.
+
+<Tip>
+  This endpoint is great for rendering a channel page — it returns subscriber/subscribed-to counts and the `isSubscribed` flag in a single round-trip, with no extra requests needed.
+</Tip>
+
+### Request parameters
+
+<ParamField path="username" type="string" required>
+  The username of the channel to look up. Case-insensitive — the query lowercases the value before matching.
+</ParamField>
+
+### Response fields
+
+Returns HTTP **200** with a single channel object (the first result of the aggregation pipeline).
+
+<ResponseField name="data" type="object">
+  The channel profile document.
+
+  <Expandable title="data fields">
+    <ResponseField name="_id" type="string">
+      MongoDB ObjectId of the channel owner.
+    </ResponseField>
+    <ResponseField name="username" type="string">
+      The channel's unique lowercase handle.
+    </ResponseField>
+    <ResponseField name="fullName" type="string">
+      Display name of the channel owner.
+    </ResponseField>
+    <ResponseField name="avatar" type="string">
+      Cloudinary URL for the channel avatar.
+    </ResponseField>
+    <ResponseField name="coverImage" type="string">
+      Cloudinary URL for the channel cover image.
+    </ResponseField>
+    <ResponseField name="subscribersCount" type="number">
+      Total number of accounts that have subscribed to this channel.
+    </ResponseField>
+    <ResponseField name="subscribedToCount" type="number">
+      Total number of channels this user is subscribed to.
+    </ResponseField>
+    <ResponseField name="isSubscribed" type="boolean">
+      `true` if the currently authenticated user is subscribed to this channel; `false` otherwise.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"User channel fetched successfully"`
+</ResponseField>
+
+### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| `401`  | Username path parameter is empty or whitespace. |
+| `404`  | No account exists with the given username. |
+
+### Example
+
+```bash
+curl -X GET http://localhost:5000/api/v1/users/c/johndoe \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "_id": "6650a1f2e4b0c3d9a9876543",
+    "username": "johndoe",
+    "fullName": "John Doe",
+    "avatar": "https://res.cloudinary.com/demo/image/upload/johndoe_avatar.jpg",
+    "coverImage": "https://res.cloudinary.com/demo/image/upload/johndoe_cover.jpg",
+    "subscribersCount": 1042,
+    "subscribedToCount": 17,
+    "isSubscribed": true
+  },
+  "message": "User channel fetched successfully",
+  "success": true
+}
+```
+
+---
+
+## Get watch history
+
+`GET /api/v1/users/watch-history`
+
+Returns the authenticated user's complete watch history as an array of fully populated video documents. The aggregation uses a nested `$lookup` pipeline: the outer stage joins the `videos` collection on the `watchHistory` array, and an inner sub-pipeline within that `$lookup` joins each video's `owner` field against the `users` collection, projecting only `fullName`, `username`, and `avatar` for each owner.
+
+<Note>
+  Watch history is returned in the order the videos were added to the `watchHistory` array on the user document. Each entry includes the owning channel's basic profile — no additional requests are needed to render the history feed.
+</Note>
+
+### Request parameters
+
+No parameters. The user is identified from the JWT.
+
+### Response fields
+
+Returns HTTP **200** with an array.
+
+<ResponseField name="data" type="array">
+  Array of video objects from the user's watch history.
+
+  <Expandable title="each video object">
+    <ResponseField name="_id" type="string">
+      MongoDB ObjectId of the video.
+    </ResponseField>
+    <ResponseField name="title" type="string">
+      Title of the video.
+    </ResponseField>
+    <ResponseField name="description" type="string">
+      Description of the video.
+    </ResponseField>
+    <ResponseField name="videoFile" type="string">
+      Cloudinary URL of the video file.
+    </ResponseField>
+    <ResponseField name="thumbnail" type="string">
+      Cloudinary URL of the video thumbnail.
+    </ResponseField>
+    <ResponseField name="duration" type="number">
+      Video duration in seconds.
+    </ResponseField>
+    <ResponseField name="views" type="number">
+      Total view count.
+    </ResponseField>
+    <ResponseField name="isPublished" type="boolean">
+      Whether the video is publicly visible.
+    </ResponseField>
+    <ResponseField name="owner" type="array">
+      Single-element array containing the owner's projected profile.
+
+      <Expandable title="owner fields">
+        <ResponseField name="fullName" type="string">
+          Display name of the video owner.
+        </ResponseField>
+        <ResponseField name="username" type="string">
+          Username of the video owner.
+        </ResponseField>
+        <ResponseField name="avatar" type="string">
+          Cloudinary URL of the owner's avatar.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp when the video was uploaded.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"User watch history fetched successfully"`
+</ResponseField>
+
+### Example
+
+```bash
+curl -X GET http://localhost:5000/api/v1/users/watch-history \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```json
+{
+  "statusCode": 200,
+  "data": [
+    {
+      "_id": "6650b2c3e4b0c3d9a7654321",
+      "title": "Getting Started with VideoHub",
+      "description": "A quick tour of VideoHub features.",
+      "videoFile": "https://res.cloudinary.com/demo/video/upload/intro.mp4",
+      "thumbnail": "https://res.cloudinary.com/demo/image/upload/intro_thumb.jpg",
+      "duration": 312,
+      "views": 4821,
+      "isPublished": true,
+      "owner": [
+        {
+          "fullName": "John Doe",
+          "username": "johndoe",
+          "avatar": "https://res.cloudinary.com/demo/image/upload/johndoe_avatar.jpg"
+        }
+      ],
+      "createdAt": "2024-04-10T14:22:00.000Z"
+    }
+  ],
+  "message": "User watch history fetched successfully",
+  "success": true
+}
+```
