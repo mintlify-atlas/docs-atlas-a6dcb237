@@ -51,7 +51,16 @@ curl -X POST http://localhost:5000/api/v1/users/login \
   -d '{"email": "user@example.com", "password": "yourpassword"}'
 ```
 
-On success, the server sets `accessToken` and `refreshToken` as `HttpOnly` cookies **and** returns them in the response body so that non-browser clients can store them explicitly:
+On success, the server sets `accessToken` and `refreshToken` as `HttpOnly` cookies with the following options, **and** returns them in the response body so that non-browser clients can store them explicitly:
+
+```js
+// Cookie options used by loginUser (user.controller.js)
+const options = {
+  httpOnly: true,
+  secure: false,
+  sameSite: "Lax",
+};
+```
 
 ```json
 {
@@ -133,7 +142,19 @@ curl -X POST http://localhost:5000/api/v1/users/refresh-token \
   -d '{"refreshToken": "<your-refresh-token>"}'
 ```
 
-A new pair of `accessToken` and `refreshToken` is issued and set as cookies. The old refresh token is invalidated in the database.
+A new access token and a rotated refresh token are issued and set as cookies. The old refresh token is invalidated in the database. Note that the response body uses the key `newRefreshToken` (not `refreshToken`) for the rotated token:
+
+```json
+{
+  "statusCode": 200,
+  "data": {
+    "accessToken": "<new-signed-jwt>",
+    "newRefreshToken": "<rotated-signed-jwt>"
+  },
+  "message": "Access token refreshed successfully ",
+  "success": true
+}
+```
 
 ## Auth Middleware Reference
 
@@ -154,6 +175,7 @@ VideoHub exposes two auth middleware functions from `auth.middleware.js`:
 - `POST /api/v1/users/refresh-token`
 - `GET /api/v1/videos` *(feed — uses `verifyJWTIfAvailable` to optionally personalise)*
 - `GET /api/v1/videos/:videoId` *(uses `verifyJWTIfAvailable` to surface `isLiked` for the caller)*
+- `GET /api/v1/dashboard/stats/:channelId` *(channel statistics — no auth middleware)*
 
 **Protected — valid access token required (`verifyJwt`)**
 
@@ -169,7 +191,7 @@ VideoHub exposes two auth middleware functions from `auth.middleware.js`:
 
 `POST /api/v1/users/logout` performs two actions atomically:
 
-1. Clears the `refreshToken` field on the `User` document in MongoDB, invalidating the session server-side
+1. Sets `refreshToken` to `undefined` on the `User` document in MongoDB via `$set: { refreshToken: undefined }`, invalidating the session server-side
 2. Clears the `accessToken` and `refreshToken` cookies on the client
 
 ```bash

@@ -1,7 +1,7 @@
 ---
-title: "CORS and Security Configuration in VideoHub"
+title: "VideoHub Backend CORS, Cookies, and Security Reference"
 sidebarTitle: "CORS & Security"
-description: "Configure allowed origins, cookie security flags, JWT token expiry, and request payload limits in the VideoHub backend."
+description: "How VideoHub configures CORS, HttpOnly cookie flags, JWT token expiry, request size limits, and the verifyJwt middleware for secure API access."
 ---
 
 VideoHub's security model is built around three interlocking mechanisms: CORS origin allowlisting to prevent unauthorized browser clients from reaching the API, HttpOnly cookies to transport tokens safely without exposing them to JavaScript, and signed JWTs to authenticate every protected request in a stateless fashion. Understanding how each layer is configured — and how to harden it for production — is essential before deploying the backend publicly.
@@ -73,7 +73,16 @@ return res
 | `secure` | `false` | The cookie is sent over both HTTP and HTTPS. **Must be set to `true` in production.** |
 | `sameSite` | `"Lax"` | The cookie is sent on same-site requests and top-level cross-site navigations, but not on cross-site sub-resource requests. This provides a reasonable balance between usability and CSRF protection. |
 
-When the `refreshAccessToken` endpoint issues a new token pair, it uses `secure: true` — meaning the refresh flow already enforces HTTPS. Align the login cookie options to match before going to production.
+The `logoutUser` controller (which clears cookies) and the `refreshAccessToken` controller (which reissues token pairs) both use a stricter options object that omits `sameSite` and enables `secure`:
+
+```js
+const options = {
+    httpOnly: true,
+    secure: true
+}
+```
+
+These two controllers therefore already enforce HTTPS-only cookie transmission. Align the login cookie options to match before going to production.
 
 <Warning>
   In production, set `secure: true` on the login cookie options and ensure the server is running behind HTTPS (either directly or via a reverse proxy such as nginx or a load balancer). A cookie with `secure: false` will be transmitted over plain HTTP, where it can be captured by a network attacker.

@@ -1,7 +1,7 @@
 ---
 title: "VideoHub Architecture: Backend and Frontend Overview"
 sidebarTitle: "Architecture"
-description: "VideoHub uses a decoupled monorepo with an Express REST API backend and a React SPA frontend. Learn how the layers fit together."
+description: "VideoHub uses a decoupled monorepo with an Express REST API backend and a React 19 SPA frontend. Learn how the layers connect and fit together."
 ---
 
 VideoHub is built as a decoupled, two-layer application living in a single monorepo. The **Backend** is a Node.js/Express 5 REST API that owns all business logic, authentication, and database access. The **Frontend** is a React 19 + Vite single-page application that communicates with the backend exclusively through HTTP. The two layers share no runtime code, which means they can be deployed, scaled, and iterated on independently.
@@ -92,7 +92,7 @@ Every successful response and every error produced by the API conforms to a pred
 **Error — `ApiError`**
 
 ```js
-// Thrown as an exception; Express error handler serialises it
+// Thrown as an exception; asyncHandler catches it and responds directly
 {
   statusCode: 400,
   message: "Title is required",
@@ -103,6 +103,8 @@ Every successful response and every error produced by the API conforms to a pred
 ```
 
 `ApiError` extends the native `Error` class. When no custom `stack` string is provided the constructor calls `Error.captureStackTrace` so that V8 stack frames point to the throw site, not to internal Error internals.
+
+`asyncHandler` wraps every controller in a `try/catch`. When a controller throws an `ApiError` (or any error), `asyncHandler` catches it and calls `res.status(error.statusCode || 500).json(...)` directly — it does **not** call Express's `next()` and does not rely on a downstream error-handling middleware.
 
 ```js
 // Throwing an error inside a controller

@@ -124,7 +124,7 @@ Uploading a video is a deliberate two-step process that decouples ID reservation
       -F "description=A short description"
     ```
 
-    The controller (`publishVideoDraft`) immediately creates a MongoDB record with `isPublished: false` and placeholder values for `videoFile` and `thumbnail`, then fires `processVideoBackground` asynchronously — **the HTTP response is returned to the client before Cloudinary processing is complete**:
+    The controller (`publishVideoDraft`) immediately creates a MongoDB record with `isPublished: false` and sets `videoFile: "processing"` and `thumbnail: "processing"` as placeholder values, then fires `processVideoBackground` asynchronously — **the HTTP response is returned to the client before Cloudinary processing is complete**:
 
     ```json
     {

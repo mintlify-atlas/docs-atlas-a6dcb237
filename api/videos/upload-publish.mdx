@@ -61,7 +61,7 @@ Creates a video document with `isPublished: false` and immediately returns. Clou
 </Warning>
 
 <Note>
-  If no `thumbnail` file is provided, VideoHub auto-generates one from the video using Cloudinary's `so_auto` transformation, capturing a representative still frame.
+  If no `thumbnail` file is provided, VideoHub auto-generates one from the video using Cloudinary's `so_auto` transformation. The thumbnail URL is constructed by splitting the Cloudinary video URL on `/upload/`, inserting `so_auto/` after it, and replacing the `.mp4` extension with `.jpg`.
 </Note>
 
 ### Path Parameters
@@ -77,11 +77,11 @@ Creates a video document with `isPublished: false` and immediately returns. Clou
 </ParamField>
 
 <ParamField body="title" type="string" required>
-  The display title of the video. Must be a non-empty string.
+  The display title of the video. The controller explicitly validates that this field is present and non-empty.
 </ParamField>
 
-<ParamField body="description" type="string">
-  An optional description of the video's content. Stored on the document and used for full-text search in the feed endpoint.
+<ParamField body="description" type="string" required>
+  A description of the video's content. The controller does not explicitly validate this field, but the Mongoose schema marks it `required: true` — omitting it will cause the database write to fail. Always provide a non-empty value.
 </ParamField>
 
 <ParamField body="thumbnail" type="file">
@@ -156,11 +156,11 @@ Returns a paginated feed of published videos. Supports full-text search, sorting
 </ParamField>
 
 <ParamField query="sortBy" type="string">
-  The document field to sort results by — for example `createdAt` or `views`. Defaults to `createdAt` when not supplied.
+  The document field to sort results by — for example `createdAt` or `views`. When omitted, results default to `createdAt` descending (newest first).
 </ParamField>
 
 <ParamField query="sortType" type="string">
-  Sort direction. Accepts `asc` (ascending) or `desc` (descending). Defaults to descending when `sortBy` is provided without this parameter.
+  Sort direction. Accepts `"asc"` (ascending) or `"desc"` (descending). Any value other than `"asc"` is treated as descending.
 </ParamField>
 
 <ParamField query="userId" type="string">
@@ -169,7 +169,7 @@ Returns a paginated feed of published videos. Supports full-text search, sorting
 
 ### Response
 
-Returns a paginated result object produced by `mongoose-aggregate-paginate-v2`. Each video document includes an embedded `ownerDetails` object.
+Returns a paginated result object produced by `mongoose-aggregate-paginate-v2`. Each video document includes an embedded `ownerDetails` object containing the owner's `username` and `avatar` (resolved via `$lookup` on the users collection).
 
 ```json
 {

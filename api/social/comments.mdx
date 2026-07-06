@@ -1,5 +1,5 @@
 ---
-title: "Video Comments API — List, Add, Edit, Delete"
+title: "Video Comments API — List, Post, Edit, and Delete"
 sidebarTitle: "Comments"
 description: "Fetch paginated comments on a video, add new comments, edit your own comments, and delete them. All endpoints require authentication."
 ---
@@ -239,5 +239,5 @@ The base Comment document stored in MongoDB has the following shape. List respon
 </ResponseField>
 
 <Note>
-  List responses (`GET /api/v1/comments/:videoId`) include three additional computed fields not stored in the database: `ownerDetails` (username, fullName, avatar), `likesCount`, and `isLiked`. These are resolved at query time via MongoDB aggregation.
+  List responses (`GET /api/v1/comments/:videoId`) include three additional computed fields not stored in the database: `ownerDetails` (username, fullName, avatar), `likesCount`, and `isLiked`. These are resolved at query time via MongoDB aggregation using `$lookup` on the `users` and `likes` collections respectively, then paginated with `Comment.aggregatePaginate`.
 </Note>

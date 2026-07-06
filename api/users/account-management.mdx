@@ -1,7 +1,7 @@
 ---
-title: "Update Account Details, Avatar, and Password"
+title: "Update Account Details, Avatar, and Password — VideoHub"
 sidebarTitle: "Account Management"
-description: "Change your VideoHub account's display name, avatar image, cover image, and password. All endpoints require authentication."
+description: "Change your VideoHub account's display name, avatar image, channel cover image, and password. All four endpoints require a valid access token."
 ---
 
 These endpoints let authenticated users update their own account. Password changes verify the existing credential before persisting the new hash. Display name updates are sent as JSON, while avatar and cover image updates use `multipart/form-data` because Multer handles the file upload before passing control to the controller, which then pushes the file to Cloudinary and saves the returned URL to the user document.
@@ -82,7 +82,7 @@ curl -X POST http://localhost:5000/api/v1/users/change-password \
 Updates the `fullName` field on the authenticated user's account. Uses `findByIdAndUpdate` with `{ new: true }` so the response contains the document as it appears after the update. The `password` field is stripped from the returned document via `.select("-password")`.
 
 <Note>
-  Only `fullName` is accepted by this endpoint. To change your `username` or `email`, contact platform support — those fields carry uniqueness constraints and require additional verification.
+  Only `fullName` is updated by this endpoint. The `username` and `email` fields are not modified here — the controller's `$set` block contains only `fullName`.
 </Note>
 
 ### Request parameters

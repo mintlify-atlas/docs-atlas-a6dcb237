@@ -69,11 +69,11 @@ curl http://localhost:5000/api/v1/dashboard/stats/64a1b2c3d4e5f6789abc1234
 
 ## View Tracking
 
-VideoHub records individual video views through a dedicated endpoint that deduplicates views per user and per IP address within a 24-hour window. When a new unique view is recorded, the `views` counter on the `Video` document is atomically incremented, which is the value surfaced by the dashboard stats endpoint above.
+VideoHub records individual video views through a dedicated endpoint that deduplicates views per user ID **or** IP address within a 24-hour window. When a new unique view is recorded, the `views` counter on the `Video` document is atomically incremented, which is the value surfaced by the dashboard stats endpoint above.
 
 ### POST /api/v1/view/:videoId
 
-Records that the currently authenticated user has watched a video. The endpoint checks for an existing `View` document that matches the combination of `videoId` and the authenticated user's ID or IP address. If a matching view was already created within the past 24 hours (view documents are TTL-indexed to expire after 86,400 seconds), the existing record is returned without incrementing the counter. Otherwise a new `View` document is created, the video's `views` field is incremented by 1, and the updated count is returned.
+Records that the currently authenticated user has watched a video. The endpoint builds a query on `videoId` plus an `$or` condition matching either the authenticated user's ID or the request's IP address against existing `View` documents. If any matching view is found (view documents are TTL-indexed to expire after 86,400 seconds), the existing record is returned without incrementing the counter. Otherwise a new `View` document is created, the video's `views` field is incremented by 1, and the updated count is returned.
 
 **Authentication required.** Include the access token in the `Authorization` header.
 
@@ -131,5 +131,5 @@ curl -X POST http://localhost:5000/api/v1/view/64a1b2c3d4e5f6789abc5678 \
 | `401`  | Access token is missing or invalid. |
 
 <Note>
-  The frontend calls this endpoint automatically when a video starts playing — you do not need to trigger it manually in normal playback flows. View deduplication is enforced per user ID **and** IP address: if either matches an existing `View` document for the same video within 24 hours, no additional count is recorded. The `views` field on the `Video` model is the authoritative counter and is the same value aggregated by `GET /api/v1/dashboard/stats/:channelId`.
+  The frontend calls this endpoint automatically when a video starts playing — you do not need to trigger it manually in normal playback flows. View deduplication is enforced per user ID **or** IP address: if either matches an existing `View` document for the same video within 24 hours, no additional count is recorded. The `views` field on the `Video` model is the authoritative counter and is the same value aggregated by `GET /api/v1/dashboard/stats/:channelId`.
 </Note>

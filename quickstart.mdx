@@ -1,5 +1,5 @@
 ---
-title: "Get Started with VideoHub in 5 Minutes"
+title: "VideoHub Quickstart: Run the Backend API in 5 Minutes"
 sidebarTitle: "Quickstart"
 description: "Clone VideoHub, configure your environment variables, start the backend server, and make your first authenticated API call in five steps."
 ---
@@ -104,8 +104,8 @@ Before you begin, make sure you have:
     ```json
     {
       "statusCode": 200,
-      "data": "OK",
-      "message": "Health check passed"
+      "data": {},
+      "message": "Server is healthy and running smoothly"
     }
     ```
   </Step>
@@ -113,33 +113,32 @@ Before you begin, make sure you have:
 
 ## Register Your First User
 
-The registration endpoint accepts a multipart form so it can receive an avatar image alongside the text fields. The `avatar` file field is required; `coverImage` is optional.
+The registration endpoint accepts `multipart/form-data` (the route uses Multer middleware), but avatar and cover-image file uploads are not currently processed server-side. Only the text fields are required: `username`, `email`, and `password`. `fullName` is optional — the server falls back to the `username` value if it is omitted.
 
 ```bash
 curl -X POST http://localhost:5000/api/v1/users/register \
   -F "username=johndoe" \
   -F "email=john@example.com" \
   -F "password=supersecret123" \
-  -F "fullName=John Doe" \
-  -F "avatar=@/path/to/avatar.jpg"
+  -F "fullName=John Doe"
 ```
 
 A successful registration returns the new user object (without the password or refresh token fields):
 
 ```json
 {
-  "statusCode": 201,
+  "statusCode": 200,
   "data": {
     "_id": "6860a1b2c3d4e5f678901234",
     "username": "johndoe",
     "email": "john@example.com",
     "fullName": "John Doe",
-    "avatar": "https://res.cloudinary.com/your-cloud/image/upload/v.../avatar.jpg",
-    "coverImage": "",
+    "avatar": "https://res.cloudinary.com/your-cloud/image/upload/default_avatar.jpg",
+    "coverImage": "https://res.cloudinary.com/your-cloud/image/upload/default_cover.jpg",
     "watchHistory": [],
     "createdAt": "2025-06-28T12:00:00.000Z"
   },
-  "message": "User registered successfully"
+  "message": "User registered sucessfully"
 }
 ```
 
@@ -153,7 +152,7 @@ curl -X POST http://localhost:5000/api/v1/users/login \
 
 The response carries `accessToken` and `refreshToken` in two places simultaneously:
 
-1. **HTTP-only cookies** (`accessToken` and `refreshToken`) — consumed automatically by browsers
+1. **HTTP-only cookies** (`accessToken` and `refreshToken`) — set with `httpOnly: true, secure: false, sameSite: "Lax"` and consumed automatically by browsers
 2. **JSON body** — available for non-browser clients (mobile apps, CLI tools)
 
 ```json

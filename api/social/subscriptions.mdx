@@ -1,7 +1,7 @@
 ---
 title: "Channel Subscriptions — Subscribe, Unsubscribe, and List"
 sidebarTitle: "Subscriptions"
-description: "Toggle channel subscriptions, retrieve a channel's subscriber list, and get all channels the current user subscribes to."
+description: "Toggle channel subscriptions, retrieve a channel's full subscriber list, and fetch all channels the authenticated user subscribes to. Auth required."
 ---
 
 Subscriptions model the relationship between a subscriber (a user who follows) and a channel (another user whose content they follow). The toggle endpoint handles both subscribing and unsubscribing in a single call — no separate endpoints are needed. All three endpoints require a valid JWT in the `Authorization` header. A user cannot subscribe to their own channel.
@@ -10,7 +10,7 @@ Subscriptions model the relationship between a subscriber (a user who follows) a
 
 ## POST /api/v1/subscriptions/c/:channelId
 
-Toggles the subscription state between the authenticated user and the given channel. If a subscription record already exists it is deleted and `isSubscribed: false` is returned. If no subscription exists a new record is created and `isSubscribed: true` is returned.
+Toggles the subscription state between the authenticated user and the given channel. The operation uses a single atomic `findOneAndDelete` call — if a subscription record matching both `subscriber` and `channel` already exists it is deleted and `isSubscribed: false` is returned. If no record is found the delete returns nothing and a new subscription document is created, returning `isSubscribed: true`.
 
 ### Path parameters
 
@@ -194,6 +194,8 @@ curl -X GET "https://api.videohub.com/api/v1/subscriptions/my-subscriptions" \
 ---
 
 ## Subscription object schema
+
+The Subscription document records a single directed follow relationship. Neither field carries a `required` constraint at the database schema level; both fields are always populated by the application logic before a document is created.
 
 <ResponseField name="_id" type="ObjectId">
   MongoDB-generated unique identifier for the subscription record.

@@ -8,10 +8,10 @@ VideoHub exposes a versioned REST API built on Node.js, Express 5, and MongoDB. 
 
 ## Base URL
 
-During local development the server starts on port `5000` by default. All requests must be prefixed with `/api/v1`.
+During local development the server starts on port `8000` by default. All requests must be prefixed with `/api/v1`.
 
 ```
-http://localhost:5000/api/v1
+http://localhost:8000/api/v1
 ```
 
 When deploying to a remote environment, replace the host and port with your server's address while keeping the `/api/v1` prefix intact.
@@ -108,16 +108,16 @@ A `200` response confirms that the Express application has started and is accept
 ## Explore the API
 
 <CardGroup cols={2}>
-  <Card title="Users" icon="user" href="/api/users">
+  <Card title="Users" icon="user" href="/api/users/register-login">
     Registration, login, token refresh, profile updates, and avatar management.
   </Card>
-  <Card title="Videos" icon="video" href="/api/videos">
+  <Card title="Videos" icon="video" href="/api/videos/upload-publish">
     Upload videos with Cloudinary, fetch feeds, update metadata, and manage publish status.
   </Card>
-  <Card title="Social Features" icon="heart" href="/api/social">
+  <Card title="Social Features" icon="heart" href="/api/social/comments">
     Likes, comments, and channel subscriptions across the platform.
   </Card>
-  <Card title="Dashboard" icon="chart-bar" href="/api/dashboard">
+  <Card title="Dashboard" icon="chart-bar" href="/api/dashboard/stats">
     Per-channel analytics including view counts, subscriber counts, and video stats.
   </Card>
 </CardGroup>

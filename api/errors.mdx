@@ -13,6 +13,7 @@ When a request fails, the API responds with a JSON body that mirrors the success
 ```json
 {
   "statusCode": 400,
+  "data": null,
   "message": "All fields are required",
   "success": false,
   "errors": []
@@ -47,7 +48,7 @@ VideoHub uses standard HTTP status codes. The table below lists every code you m
 
 ## Error Handling Pattern
 
-Every controller in VideoHub is wrapped with the `asyncHandler` utility. Any thrown `ApiError` — or any unexpected promise rejection — is caught by the wrapper and forwarded to Express's response pipeline, ensuring no unhandled rejection can crash the server.
+Every controller in VideoHub is wrapped with the `asyncHandler` utility. Any thrown `ApiError` — or any unexpected promise rejection — is caught by the `try/catch` wrapper, which immediately writes a JSON error response directly to `res` rather than delegating to a downstream error handler. This guarantees no unhandled rejection can crash the server.
 
 ```js
 const asyncHandler = (func) => async (req, res, next) => {
@@ -122,6 +123,8 @@ These `400 Bad Request` responses are returned when required fields are absent, 
 | `"Invalid playlist ID"` | Any playlist route — ID fails MongoDB ObjectId validation |
 | `"Username or email is required"` | Login — both identifier fields are empty |
 | `"User does not exist"` | Login or profile — no matching account found |
+| `"You do not have permission to edit this comment"` | Comment update — comment was created by a different user |
+| `"You do not have permission to delete this comment"` | Comment delete — comment was created by a different user |
 
 ## Ownership / Permission Errors (403)
 
@@ -129,8 +132,6 @@ A `403 Forbidden` response is returned when the authenticated user is valid but 
 
 | Message | Trigger |
 |---------|---------|
-| `"You do not have permission to edit this comment"` | Trying to update a comment created by another user |
-| `"You do not have permission to delete this comment"` | Trying to delete a comment created by another user |
 | `"You do not have permission to modify this playlist"` | Trying to add/remove videos from another user's playlist |
 | `"You do not have permission to toggle this video's status"` | Trying to publish/unpublish a video you did not upload |
 

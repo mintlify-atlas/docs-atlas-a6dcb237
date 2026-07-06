@@ -1,7 +1,7 @@
 ---
 title: "Playlists API — Create, Manage, and Organize Videos"
 sidebarTitle: "Playlists"
-description: "Create named playlists, add and remove videos, update playlist metadata, delete playlists, and fetch playlists by user or by ID."
+description: "Create named playlists, add and remove videos, update playlist metadata, delete playlists, and retrieve playlists by owner or by playlist ID."
 ---
 
 Playlists belong to a user and hold an ordered list of video references. All endpoints require a valid JWT in the `Authorization` header. Only the playlist owner can modify, add videos to, remove videos from, or delete a playlist — operations on playlists owned by other users return an error. Duplicate video entries within a single playlist are prevented at the API level.
@@ -108,7 +108,7 @@ curl -X GET "https://api.videohub.com/api/v1/playlist/64f1a2b3c4d5e6f7a8b9c0d5" 
 
 ## PATCH /api/v1/playlist/:playlistId
 
-Updates the `name` and/or `description` of an existing playlist. At least one of the two fields must be included in the request body. Only the playlist owner can perform this operation.
+Updates the `name` and/or `description` of an existing playlist. At least one of the two fields must be included in the request body. Only the playlist owner can perform this operation. Ownership is enforced inside the `findOneAndUpdate` query — a non-owner update returns `404`. The response contains only the fields that were actually updated, not the full playlist document.
 
 ### Path parameters
 
@@ -158,7 +158,7 @@ curl -X PATCH "https://api.videohub.com/api/v1/playlist/64f1a2b3c4d5e6f7a8b9c0d5
 
 ## DELETE /api/v1/playlist/:playlistId
 
-Permanently deletes a playlist and its video reference list. The underlying video documents are not affected — only the playlist record is removed. Only the playlist owner can delete a playlist.
+Permanently deletes a playlist and its video reference list. The underlying video documents are not affected — only the playlist record is removed. Ownership is enforced atomically via `findOneAndDelete({ _id: playlistId, owner: req.user._id })` — only the playlist owner can delete it.
 
 ### Path parameters
 
@@ -195,7 +195,7 @@ curl -X DELETE "https://api.videohub.com/api/v1/playlist/64f1a2b3c4d5e6f7a8b9c0d
 
 ## PATCH /api/v1/playlist/add/:videoId/:playlistId
 
-Adds a video to a playlist. The video is appended to the `videos` array using `$push`. The endpoint checks for duplicate entries and rejects the request if the video is already present in the playlist. Only the playlist owner can modify the playlist.
+Adds a video to a playlist. The endpoint first verifies ownership of the playlist, then checks whether the video is already present in the `videos` array. If the video is a duplicate a `400` error is returned immediately and no database write occurs. Otherwise the video ObjectId is appended using `$push`.
 
 ### Path parameters
 
@@ -242,7 +242,7 @@ curl -X PATCH "https://api.videohub.com/api/v1/playlist/add/64f1a2b3c4d5e6f7a8b9
 
 ## PATCH /api/v1/playlist/remove/:videoId/:playlistId
 
-Removes a video from a playlist using MongoDB's `$pull` operator. Only the playlist owner may perform this operation. If the video is not in the playlist the `$pull` is a no-op and the updated playlist is still returned successfully.
+Removes a video from a playlist using MongoDB's `$pull` operator. The endpoint first verifies ownership, then performs the update. If the video is not in the playlist the `$pull` is a no-op and the updated playlist is still returned successfully.
 
 ### Path parameters
 
@@ -284,7 +284,7 @@ curl -X PATCH "https://api.videohub.com/api/v1/playlist/remove/64f1a2b3c4d5e6f7a
 
 ## GET /api/v1/playlist/user/:userId
 
-Returns all playlists owned by the specified user. This is useful for rendering a user's playlist library on their profile page. The response is the raw playlist documents without expanded video details — use `GET /api/v1/playlist/:playlistId` to fetch a specific playlist with full video data.
+Returns all playlists owned by the specified user via a simple `Playlist.find({ owner: userId })` — no aggregation is performed. This is useful for rendering a user's playlist library on their profile page. Use `GET /api/v1/playlist/:playlistId` to fetch a specific playlist with full expanded video data.
 
 ### Path parameters
 
@@ -319,7 +319,7 @@ curl -X GET "https://api.videohub.com/api/v1/playlist/user/64f1a2b3c4d5e6f7a8b9c
   MongoDB-generated unique identifier for the playlist.
 </ResponseField>
 <ResponseField name="name" type="string">
-  Required. The display name of the playlist. Must be unique per owner.
+  Required. The display name of the playlist. Must be unique per owner. This is the only field with a `required` constraint in the schema.
 </ResponseField>
 <ResponseField name="description" type="string">
   Optional free-text description of the playlist.
@@ -328,7 +328,7 @@ curl -X GET "https://api.videohub.com/api/v1/playlist/user/64f1a2b3c4d5e6f7a8b9c
   Ordered array of references to `Video` documents. Entries are appended with `$push` (add) and removed with `$pull` (remove). Duplicates are rejected at the application layer before any database write.
 </ResponseField>
 <ResponseField name="owner" type="ObjectId">
-  Reference to the `User` document who owns this playlist.
+  Reference to the `User` document who owns this playlist. Always set by application logic when a playlist is created.
 </ResponseField>
 <ResponseField name="createdAt" type="Date">
   Automatically set by Mongoose `timestamps` on document creation.

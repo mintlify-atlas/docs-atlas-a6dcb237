@@ -1,10 +1,12 @@
 ---
 title: "Toggle Likes on Videos, Comments, and Community Posts"
 sidebarTitle: "Likes"
-description: "Like or unlike videos, comments, and community posts using toggle endpoints. Get all videos liked by the current user."
+description: "Toggle likes on videos, comments, and community posts with a single endpoint per resource. Retrieve all videos the current user has liked."
 ---
 
 Likes in VideoHub are toggle-based — calling a toggle endpoint when the authenticated user has already liked the target resource removes the like (unlike), and calling it when no like exists creates one. There is no separate "like" and "unlike" endpoint; one `POST` handles both transitions and returns the resulting state. All endpoints require a valid JWT in the `Authorization` header.
+
+Each toggle works by first searching for an existing Like document matching the resource ID and the authenticated user's `likedBy` field. If a record is found it is deleted (unlike); if no record is found a new one is created (like). This `findOne` + delete-or-create pattern is used for all three toggle endpoints.
 
 ---
 
@@ -98,12 +100,12 @@ curl -X POST "https://api.videohub.com/api/v1/likes/toggle/c/64f1a2b3c4d5e6f7a8b
 
 ## POST /api/v1/likes/toggle/t/:tweetId
 
-Toggles the like state of a community post (internally referred to as a tweet) for the currently authenticated user. The community post ID is stored in the `community` field of the Like document.
+Toggles the like state of a community post for the currently authenticated user. The URL path uses the parameter name `tweetId`, but internally the Like document stores the reference in the `community` field (not a `tweet` field) — the Like model uses `community` as the field name for all community post likes.
 
 ### Path parameters
 
 <ParamField path="tweetId" type="string" required>
-  The MongoDB ObjectId of the community post to like or unlike. Returns `400` if missing or not a valid ObjectId.
+  The MongoDB ObjectId of the community post to like or unlike. Stored as the `community` field in the Like document. Returns `400` if missing or not a valid ObjectId.
 </ParamField>
 
 ### Response
@@ -142,7 +144,7 @@ curl -X POST "https://api.videohub.com/api/v1/likes/toggle/t/64f1a2b3c4d5e6f7a8b
 
 ## GET /api/v1/likes/videos
 
-Returns an array of all videos that the currently authenticated user has liked, sorted by most recently liked first. Each entry is a flattened video document that includes the video owner's public profile.
+Returns an array of all videos that the currently authenticated user has liked, sorted by most recently liked first. Each entry is a flattened video document that includes the video owner's public profile. The aggregation pipeline matches Like documents where `likedBy` equals the current user and the `video` field exists and is non-null, then performs a `$lookup` on the videos collection with a nested `$lookup` on users for owner details.
 
 ### Parameters
 
@@ -210,15 +212,11 @@ curl -X GET "https://api.videohub.com/api/v1/likes/videos" \
 }
 ```
 
-<Note>
-  The `isLiked` flag for a specific video is also included when fetching a video's full details via `GET /api/v1/videos/:videoId`, so you do not need a separate call to the likes API just to check whether the current user has liked a particular video.
-</Note>
-
 ---
 
 ## Like object schema
 
-The Like document stored in MongoDB is a sparse record — only the field corresponding to the liked resource type (`video`, `comment`, or `community`) is set; the others are left undefined.
+The Like document stored in MongoDB is a sparse record — only the field corresponding to the liked resource type (`video`, `comment`, or `community`) is set; the others are left undefined. No fields carry a `required` constraint at the database level; all uniqueness and presence enforcement happens in the application layer.
 
 <ResponseField name="_id" type="ObjectId">
   MongoDB-generated unique identifier for the like record.
@@ -230,7 +228,7 @@ The Like document stored in MongoDB is a sparse record — only the field corres
   Reference to the liked `Comment` document. Present only for comment likes.
 </ResponseField>
 <ResponseField name="community" type="ObjectId">
-  Reference to the liked `Community` (tweet/post) document. Present only for community post likes.
+  Reference to the liked `Community` post document. Present only for community post likes. Note: the toggle endpoint for community posts uses the URL parameter name `tweetId`, but this is the actual database field name.
 </ResponseField>
 <ResponseField name="likedBy" type="ObjectId">
   Reference to the `User` document who created the like.

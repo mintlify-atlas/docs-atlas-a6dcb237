@@ -1,5 +1,5 @@
 ---
-title: "Register, Login, and Manage Sessions in VideoHub"
+title: "Register, Login, and Manage Sessions — VideoHub API"
 sidebarTitle: "Register & Login"
 description: "Create a new VideoHub account, log in to receive JWT tokens, refresh an expired access token, and log out to invalidate your session."
 ---
@@ -21,7 +21,7 @@ VideoHub uses a dual-token authentication system: a short-lived **access token**
 
 `POST /api/v1/users/register`
 
-Creates a new VideoHub user account. Send fields as `multipart/form-data` because the endpoint is wired through Multer and supports optional file uploads (avatar and cover image) in the same request. Passwords are hashed with bcrypt before storage and are never returned in any response.
+Creates a new VideoHub user account. Send fields as a JSON body. Passwords are hashed with bcrypt before storage and are never returned in any response.
 
 <Note>
   Usernames are stored in lowercase and must be unique across the platform. The same uniqueness constraint applies to email addresses.
@@ -103,10 +103,8 @@ Returns HTTP **201** with a user object. `password` and `refreshToken` are alway
 
 ```bash
 curl -X POST http://localhost:5000/api/v1/users/register \
-  -F "username=janedoe" \
-  -F "email=jane@example.com" \
-  -F "password=SuperSecret42" \
-  -F "fullName=Jane Doe"
+  -H "Content-Type: application/json" \
+  -d '{"username": "janedoe", "email": "jane@example.com", "password": "SuperSecret42", "fullName": "Jane Doe"}'
 ```
 
 ```json
@@ -134,7 +132,7 @@ curl -X POST http://localhost:5000/api/v1/users/register \
 
 `POST /api/v1/users/login`
 
-Authenticates a user with either their `email` or `username` plus their `password`. On success, both an `accessToken` and a `refreshToken` are issued as `HttpOnly` cookies and are also included in the JSON response body for non-browser clients.
+Authenticates a user with either their `email` or `username` plus their `password`. On success, both an `accessToken` and a `refreshToken` are issued as `HttpOnly` cookies (`httpOnly: true`, `secure: false`, `sameSite: "Lax"`) and are also included in the JSON response body for non-browser clients.
 
 <Note>
   You can supply either `email` or `username` — at least one is required. If both are provided, the server matches against either field.
@@ -179,7 +177,7 @@ Returns HTTP **200**.
 | Status | Condition |
 |--------|-----------|
 | `400`  | Neither `username` nor `email` was provided. |
-| `400`  | No account found matching the provided credentials. |
+| `400`  | No account found with the given `username` or `email`. |
 | `401`  | Password does not match the stored hash. |
 
 ### Example

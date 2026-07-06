@@ -1,7 +1,7 @@
 ---
-title: "Environment Variables Reference for VideoHub"
+title: "VideoHub Backend Environment Variables Configuration"
 sidebarTitle: "Environment Variables"
-description: "Complete reference for all VideoHub backend environment variables: server, database, JWT, Cloudinary, and default asset configuration."
+description: "A complete reference for all 13 VideoHub backend environment variables covering server, database, JWT secrets, Cloudinary, and default asset URLs."
 ---
 
 All runtime configuration for the VideoHub backend is supplied through environment variables loaded from a `.env` file located in the `Backend/` directory. The server uses the `dotenv` package (called in `src/index.js`) to populate `process.env` before any application code runs, which means every variable listed here must be present before starting the server.
@@ -26,7 +26,7 @@ Edit the resulting `.env` file and fill in every blank value before running the 
 </ParamField>
 
 <ParamField path="HOST" type="string" default="0.0.0.0">
-  The network interface address the server listens on. `0.0.0.0` binds to all available interfaces, which is correct for most Docker and cloud deployments. Use `127.0.0.1` to restrict access to localhost only during development.
+  The intended network interface address for the server. `index.js` reads this variable (`process.env.HOST || '0.0.0.0'`) but the current `app.listen()` call only passes the port — the host argument is not forwarded, so this variable is read but has no effect on the actual bind address in the current implementation. It is kept in `.env.sample` for forward compatibility.
 </ParamField>
 
 <ParamField path="CORS_ORIGIN" type="string" required>
